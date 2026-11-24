@@ -7,7 +7,11 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { Room } from './room.js';
 import { startTunnel } from './tunnel.js';
-import { listSources, startCapture, LIVE_FILE } from './capture.js';
+import net from 'node:net';
+import { listSources, startCapture, prepareHelper, LIVE_FILE } from './capture.js';
+import { prepareWorkspace, workspaceStatus, setupWorkspace, startDesk, stopDesk, runningDesk, DESK_PORT, DESK_SOUND_PORT, DESK_PICTURE_PORT } from './workspace.js';
+import { listenToDesk } from './deskaudio.js';
+import { ViewOnlyGate } from './rfb.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 try { process.loadEnvFile(path.join(ROOT, '.env')); } catch {}
@@ -22,6 +26,8 @@ const PORT = Number(process.env.PORT) || 4747;
 const HOST = process.env.HOST || '127.0.0.1';
 const ONLINE = process.argv.includes('--online');
 const ALLOW_REMOTE_HOST = process.env.ALLOW_REMOTE_HOST === '1';
+// The shared computer is unfinished: switched off, and absent from the pages, unless asked for.
+const SHARED_COMPUTER = process.env.SHARED_COMPUTER === '1';
 const MAX_UPLOAD = (Number(process.env.MAX_UPLOAD_GB) || 50) * 1024 ** 3;
 const MAX_CONNECTIONS = 200;
 let publicUrl = (process.env.PUBLIC_URL || '').replace(/\/+$/, '');
@@ -115,6 +121,8 @@ function openRoom(id) {
   if (!movie) return null;
   const room = new Room({ id, name: saved.name, movie, position: saved.position || 0, isHostKey, onChange: save, ice });
   room.onLiveEnd = () => { if (live?.roomId === id) stopLive(); };
+  room.onDeskEnd = () => { if (runningDesk()?.roomId === id) stopDesk(); };
+  room.onRole = (person) => dropDeskViewers(id, person.pid); // they reconnect with their new rights
   rooms.set(id, room);
   return room;
 }
@@ -130,30 +138,84 @@ function stopLive() {
   const room = rooms.get(was.roomId);
   if (room?.share?.kind === 'live') room.setShare(null);
 }
-async function beginLive(room, { screen, audio, pid }) {
-  const sources = listSources();
-  if (!sources.supported) return 'unsupported';
-  if (!sources.screens.some((s) => s.id === screen)) return 'unknown_screen';
+async function beginLive(room, { source: sourceId, audio, pid }) {
+  if (starting) return 'busy';
+  starting = true;
+  try {
+    return await beginLiveNow(room, { sourceId, audio, pid });
+  } finally { starting = false; }
+}
+async function beginLiveNow(room, { sourceId, audio, pid }) {
+  // Only what this computer just listed can be captured, never a raw value from the request.
+  const sources = await listSources();
+  if (!sources.supported) return sources.note === 'no_permission' ? 'no_permission' : 'unsupported';
+  const source = [...sources.screens, ...sources.windows].find((s) => s.id === sourceId);
+  if (!source) return 'source_gone';
   if (audio != null && !sources.audio.some((a) => a.id === audio)) return 'unknown_audio';
   const host = room.people.get(String(pid));
   if (!host || host.role !== 'host') return 'not_in_theatre';
-  if (starting) return 'busy';
-  starting = true;
   stopLive();
   const dir = path.join(LIVE, `${room.id}.${Date.now()}`);
   try {
     // If ffmpeg stops by itself (display unplugged, crash), take the share down.
-    const cap = await startCapture({ dir, screen, audio, onEnd: () => { if (live?.dir === dir) stopLive(); } });
+    const cap = await startCapture({ dir, source, audio, onEnd: () => { if (live?.dir === dir) stopLive(); } });
     live = { roomId: room.id, dir, stop: cap.stop };
     if (!room.startLive(pid)) { stopLive(); return 'not_in_theatre'; }
     return null;
   } catch (e) {
     return e.message;
-  } finally { starting = false; }
+  }
+}
+
+// ---------- the shared computer ----------
+// Browsers watching or using the shared computer's screen: pid -> sockets.
+const deskViewers = new Map();
+function dropDeskViewers(roomId, pid) {
+  for (const [key, set] of deskViewers) {
+    if (key.startsWith(roomId + ' ') && (pid == null || key === `${roomId} ${pid}`)) for (const s of set) s.close();
+  }
+}
+// Live streams out of the shared computer, each read from the machine once and
+// handed to everyone who wants it: its sound alone (for people using it, whose
+// picture comes another way) and its screen with sound as video (for people
+// watching). The machine only produces a stream while someone is on it.
+function makeDeskStream(port) {
+  const hub = { ip: null, listeners: new Set(), init: null, source: null };
+  const stopSource = () => { hub.source?.stop(); hub.source = null; hub.init = null; };
+  hub.add = (ws) => {
+    if (!hub.ip) return ws.close();
+    hub.listeners.add(ws);
+    ws.on('close', () => { hub.listeners.delete(ws); if (!hub.listeners.size) stopSource(); });
+    if (hub.init) ws.send(hub.init);
+    if (!hub.source) hub.source = listenToDesk({
+      host: hub.ip, port,
+      onInit: (buf) => { hub.init = buf; for (const l of hub.listeners) if (l.readyState === 1) { l.send('restart'); l.send(buf); } },
+      // Someone on a slow link skips ahead rather than falling ever further behind.
+      onFragment: (buf) => { for (const l of hub.listeners) if (l.readyState === 1 && l.bufferedAmount < 1_500_000) l.send(buf); },
+    });
+  };
+  hub.start = (ip) => { hub.stop(); hub.ip = ip; };
+  hub.stop = () => { hub.ip = null; stopSource(); for (const l of hub.listeners) l.close(); hub.listeners.clear(); };
+  return hub;
+}
+const deskStreams = { sound: makeDeskStream(DESK_SOUND_PORT), picture: makeDeskStream(DESK_PICTURE_PORT) };
+const stopDeskStreams = () => { for (const h of Object.values(deskStreams)) h.stop(); };
+
+async function beginDesk(room, pid) {
+  const host = room.people.get(String(pid));
+  if (!host || host.role !== 'host') return 'not_in_theatre';
+  if (room.share) return 'screen_busy';
+  try {
+    const vm = await startDesk(room.id, () => { stopDeskStreams(); dropDeskViewers(room.id); if (room.share?.kind === 'desk') room.setShare(null); });
+    for (const h of Object.values(deskStreams)) h.start(vm.ip);
+  } catch (e) { return e.message; }
+  if (!room.startDesk(pid)) { stopDesk(); return 'not_in_theatre'; }
+  return null;
 }
 
 function closeRoom(id) {
   if (live?.roomId === id) stopLive();
+  if (runningDesk()?.roomId === id) stopDesk();
   const room = rooms.get(id);
   if (room) { for (const person of room.people.values()) person.conn.close(); rooms.delete(id); }
   delete state.rooms[id];
@@ -245,6 +307,15 @@ async function route(req, res) {
     if (p === '/') return serveFile(req, res, path.join(PUBLIC, 'index.html'));
     if (p === '/host') return isLocal(req) ? serveFile(req, res, path.join(PUBLIC, 'host.html')) : notFound(req, res);
     if (/^\/r\/[\w-]+$/.test(p)) return serveFile(req, res, path.join(PUBLIC, 'theatre.html'));
+    // The viewer for the shared computer's screen (noVNC), straight from its package.
+    if (p.startsWith('/vendor/novnc/')) {
+      const f = /^[\w./-]+\.js$/.test(p) ? safeJoin(path.join(ROOT, 'node_modules/@novnc/novnc'), p.slice('/vendor/novnc/'.length)) : null;
+      return f ? serveFile(req, res, f, 'public, max-age=86400') : notFound(req, res);
+    }
+    if (p === '/api/workspace') {
+      if (!isHost(req)) return send(req, res, 401, { error: 'unauthorized' });
+      return send(req, res, 200, SHARED_COMPUTER ? workspaceStatus() : { state: 'off' });
+    }
     if (p === '/vendor/hls.min.js') return serveFile(req, res, path.join(ROOT, 'node_modules/hls.js/dist/hls.min.js'), 'public, max-age=86400');
     if (p.startsWith('/assets/')) {
       const f = safeJoin(path.join(PUBLIC, 'assets'), p.slice('/assets/'.length));
@@ -267,7 +338,7 @@ async function route(req, res) {
     }
     if (p === '/api/capture') {
       if (!isHost(req)) return send(req, res, 401, { error: 'unauthorized' });
-      return send(req, res, 200, { ...listSources(), live: live?.roomId || null });
+      return send(req, res, 200, { ...(await listSources()), live: live?.roomId || null });
     }
     const rm = /^\/api\/room\/([\w-]+)$/.exec(p);
     if (rm) {
@@ -301,12 +372,26 @@ async function route(req, res) {
   }
   if (req.method === 'POST' && p === '/api/movies') return receiveMovie(req, res, url);
 
+  if (req.method === 'POST' && p === '/api/workspace/setup') {
+    if (!SHARED_COMPUTER) return send(req, res, 404, { error: 'off' });
+    return setupWorkspace() ? send(req, res, 200, { ok: true }) : send(req, res, 400, { error: workspaceStatus().state });
+  }
+  const desk = /^\/api\/rooms\/([\w-]+)\/desk$/.exec(p);
+  if (desk && req.method === 'POST') {
+    if (!SHARED_COMPUTER) return send(req, res, 404, { error: 'off' });
+    const room = openRoom(desk[1]);
+    if (!room) return send(req, res, 404, { error: 'not_found' });
+    const body = await readJson(req);
+    const error = await beginDesk(room, body.pid);
+    return error ? send(req, res, 400, { error }) : send(req, res, 200, { ok: true });
+  }
+
   const cast = /^\/api\/rooms\/([\w-]+)\/broadcast$/.exec(p);
   if (cast && req.method === 'POST') {
     const room = openRoom(cast[1]);
     if (!room) return send(req, res, 404, { error: 'not_found' });
     const body = await readJson(req);
-    const error = await beginLive(room, { screen: String(body.screen ?? ''), audio: body.audio == null ? null : String(body.audio), pid: body.pid });
+    const error = await beginLive(room, { source: String(body.source ?? ''), audio: body.audio == null ? null : String(body.audio), pid: body.pid });
     return error ? send(req, res, 400, { error }) : send(req, res, 200, { ok: true });
   }
   if (cast && req.method === 'DELETE') {
@@ -335,12 +420,62 @@ server.headersTimeout = 15000;
 
 // ---------- websocket ----------
 const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+// The shared computer's screen: a WebSocket per viewer, bridged to the display
+// server inside the virtual machine. People holding the remote get the raw
+// connection; everyone else goes through a gate that drops keys and clicks.
+const deskWss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
+// Anyone in the theatre may watch and listen to the shared computer.
+function bridgeDeskStream(req, socket, head, roomId, hub) {
+  const room = rooms.get(roomId);
+  if (!room || room.share?.kind !== 'desk' || runningDesk()?.roomId !== roomId || deskWss.clients.size >= MAX_CONNECTIONS) return socket.destroy();
+  deskWss.handleUpgrade(req, socket, head, (ws) => {
+    ws.on('error', () => {});
+    const late = setTimeout(() => ws.terminate(), 8000);
+    ws.once('message', (first, isBinary) => {
+      clearTimeout(late);
+      if (isBinary || !room.personByTicket(first.toString()) || runningDesk()?.roomId !== roomId) return ws.close();
+      hub.add(ws);
+    });
+  });
+}
+function bridgeDesk(req, socket, head, roomId) {
+  const room = rooms.get(roomId);
+  if (!room || room.share?.kind !== 'desk' || deskWss.clients.size >= MAX_CONNECTIONS) return socket.destroy();
+  deskWss.handleUpgrade(req, socket, head, (ws) => {
+    ws.on('error', () => {});
+    const late = setTimeout(() => ws.terminate(), 8000);
+    // The first message is the viewer's private ticket (kept out of the address).
+    ws.once('message', (first, isBinary) => {
+      clearTimeout(late);
+      const person = isBinary ? null : room.personByTicket(first.toString());
+      const vm = runningDesk();
+      if (!person || !vm || vm.roomId !== roomId || room.share?.kind !== 'desk') return ws.close();
+      const gate = person.role === 'host' || person.role === 'cohost' ? null : new ViewOnlyGate();
+      const key = `${roomId} ${person.pid}`;
+      if (!deskViewers.has(key)) deskViewers.set(key, new Set());
+      deskViewers.get(key).add(ws);
+      const tcp = net.connect({ host: vm.ip, port: DESK_PORT });
+      tcp.setNoDelay(true);
+      tcp.on('data', (d) => { if (ws.readyState === 1) { ws.send(d); if (ws.bufferedAmount > 16_000_000) ws.terminate(); } });
+      tcp.on('close', () => ws.close());
+      tcp.on('error', () => ws.close());
+      ws.on('message', (raw) => {
+        try { const out = gate ? gate.push(raw) : raw; if (out.length) tcp.write(out); } catch { ws.close(); }
+      });
+      ws.on('close', () => { tcp.destroy(); deskViewers.get(key)?.delete(ws); if (!deskViewers.get(key)?.size) deskViewers.delete(key); });
+    });
+  });
+}
+
 server.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url, 'http://x');
   const room = url.pathname === '/ws' ? openRoom(url.searchParams.get('room') || '') : null;
   // Refuse pages on other websites trying to open a connection from a visitor's browser.
   let sameOrigin = true;
   if (req.headers.origin) { try { sameOrigin = new URL(req.headers.origin).host === req.headers.host; } catch { sameOrigin = false; } }
+  if (sameOrigin && url.pathname === '/desk') return bridgeDesk(req, socket, head, url.searchParams.get('room') || '');
+  if (sameOrigin && url.pathname === '/desksound') return bridgeDeskStream(req, socket, head, url.searchParams.get('room') || '', deskStreams.sound);
+  if (sameOrigin && url.pathname === '/deskpicture') return bridgeDeskStream(req, socket, head, url.searchParams.get('room') || '', deskStreams.picture);
   if (!room || !sameOrigin || wss.clients.size >= MAX_CONNECTIONS) return socket.destroy();
   wss.handleUpgrade(req, socket, head, (ws) => {
     const conn = {
@@ -365,7 +500,7 @@ server.on('upgrade', (req, socket, head) => {
         else room.handle(conn, msg);
       } catch (e) { console.error('room error:', e.message); }
     });
-    ws.on('close', () => { clearTimeout(helloTimer); room.leave(conn); });
+    ws.on('close', () => { clearTimeout(helloTimer); const pid = conn.person?.pid; room.leave(conn); if (pid) dropDeskViewers(room.id, pid); });
     ws.on('error', () => {});
   });
 });
@@ -379,6 +514,8 @@ let tunnel = null;
 server.on('error', (e) => { console.error(e.code === 'EADDRINUSE' ? `Port ${PORT} is already in use. Set PORT in .env to use another.` : e.message); process.exit(1); });
 server.listen(PORT, HOST, () => {
   writeState();
+  prepareHelper(DATA); // builds the macOS window capture helper in the background
+  if (SHARED_COMPUTER) prepareWorkspace(DATA); // and the helper that runs the shared computer
   console.log('\n  Villavisión is running.\n');
   console.log('  Your host page (private: it controls your theatres):');
   console.log(`  http://localhost:${PORT}/host#key=${state.hostKey}\n`);
@@ -391,6 +528,7 @@ server.listen(PORT, HOST, () => {
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => {
   try { writeState(); } catch {}
   stopLive();
+  stopDesk();
   tunnel?.kill();
   process.exit(0);
 });

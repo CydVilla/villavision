@@ -19,11 +19,15 @@ export class Room {
     this.people = new Map(); // pid -> person (connected)
     this.remembered = new Map(); // clientId -> { pid, role, seat }
     this.chat = [];
-    // While something is on the big screen instead of the film: { pid, streamId }
-    // for a share sent from a browser, or { kind: 'live', pid, v } for a screen
+    // While something is on the big screen instead of the film:
+    // { kind: 'live', pid, v } for a screen
     // captured by Villavisión on the host computer.
     this.share = null;
     this.onLiveEnd = () => {}; // told when a 'live' share ends, so capture can stop
+    // { kind: 'desk', pid: null, v } is the shared computer on the big screen. It
+    // belongs to the theatre, not to one person, so it stays up if the host steps out.
+    this.onDeskEnd = () => {}; // told when the shared computer is taken down
+    this.onRole = () => {}; // told when someone gains or loses the remote
     this.ice = ice || null;
   }
 
@@ -50,6 +54,22 @@ export class Room {
     return true;
   }
 
+  // The shared computer is up for this theatre. Only a host in the room may start it.
+  startDesk(pid) {
+    const host = this.people.get(String(pid));
+    if (!host || host.role !== 'host') return false;
+    if (this.play.playing) this.setPlay(false, this.position(), host.name);
+    this.setShare({ kind: 'desk', pid: null, streamId: null, v: Date.now() });
+    return true;
+  }
+
+  // Who a private ticket belongs to (used to open the shared computer's screen).
+  personByTicket(ticket) {
+    if (typeof ticket !== 'string' || ticket.length < 16) return null;
+    for (const p of this.people.values()) if (p.ticket === ticket) return p;
+    return null;
+  }
+
   setPlay(playing, position, by) {
     this.play = { playing, position, at: Date.now(), by };
     this.broadcast({ type: 'state', state: this.play, now: Date.now() });
@@ -57,10 +77,11 @@ export class Room {
   }
 
   setShare(share) {
-    const wasLive = this.share?.kind === 'live';
+    const wasLive = this.share?.kind === 'live', wasDesk = this.share?.kind === 'desk';
     this.share = share;
     this.broadcast({ type: 'share', share });
     if (wasLive && share?.kind !== 'live') this.onLiveEnd();
+    if (wasDesk && share?.kind !== 'desk') this.onDeskEnd();
   }
 
   publicPeople() {
@@ -115,13 +136,13 @@ export class Room {
       }
     }
 
-    const person = { pid: mem.pid, sid: rid(4), name, role: mem.role, seat: mem.seat, mic: false, cam: false, streamId: null, conn, mem, lastReact: 0, lastChat: 0 };
+    const person = { pid: mem.pid, sid: rid(4), name, role: mem.role, seat: mem.seat, mic: false, cam: false, streamId: null, conn, mem, lastReact: 0, lastChat: 0, ticket: rid(18) };
     conn.person = person;
     this.people.set(person.pid, person);
 
     conn.send({
       type: 'welcome',
-      you: { pid: person.pid, role: person.role },
+      you: { pid: person.pid, role: person.role, ticket: person.ticket },
       room: { id: this.id, name: this.name, seats: SEATS },
       movie: { title: this.movie.title, duration: this.movie.duration, subs: this.movie.subs || [] },
       state: this.play,
@@ -173,6 +194,7 @@ export class Room {
         target.role = target.mem.role = msg.cohost ? 'cohost' : 'guest';
         if (target.role === 'guest' && this.share?.pid === target.pid) this.setShare(null);
         target.conn.send({ type: 'role', role: target.role });
+        this.onRole(target);
         this.broadcast({ type: 'people', people: this.publicPeople() });
         break;
       }
@@ -214,14 +236,9 @@ export class Room {
       }
 
       case 'share': {
-        // Screen sharing takes over the big screen. Only the host and people
-        // holding the remote may start one; the host can stop anyone's.
-        if (msg.on) {
-          const streamId = clean(msg.streamId, 64);
-          if (!canControl || !streamId || (this.share && this.share.pid !== me.pid)) return;
-          if (this.play.playing) this.setPlay(false, this.position(), me.name);
-          this.setShare({ pid: me.pid, streamId });
-        } else if (this.share && (this.share.pid === me.pid || me.role === 'host')) this.setShare(null);
+        // A share is started by the server (startLive, startDesk), never by a
+        // message from a browser. The host can take down whatever is up.
+        if (!msg.on && this.share && (this.share.pid === me.pid || me.role === 'host')) this.setShare(null);
         break;
       }
 

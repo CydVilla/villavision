@@ -70,7 +70,7 @@ To try it alone first, `npm start` runs everything without going online.
 | Button | What it does | Who |
 |---|---|---|
 | ▶ / ⏸ and the timeline | Play, pause, skip for everyone | Host, and anyone holding the remote |
-| 🖥️ | Share your screen on the big screen | Host, and anyone holding the remote |
+| 🖥️ | Share a screen or window on the big screen | Host |
 | 🎤 📷 | Your microphone and webcam | Everyone |
 | 🔊 CC ⛶ | Your own volume, subtitles, fullscreen | Everyone |
 | 😂 ❤️ … | Reactions that float over the screen | Everyone |
@@ -85,43 +85,40 @@ To try it alone first, `npm start` runs everything without going online.
 
 ### Screen sharing
 
-There are two ways to share, and no film is needed for either: on the host
-page, **Screen sharing theatre** opens a theatre with an empty big screen.
+No film is needed: on the host page, **Screen sharing theatre** opens a
+theatre with an empty big screen.
 
-**From the host computer (Villavisión's own capture).** When the host clicks
-🖥️ on the computer that runs Villavisión, a small panel asks which screen and
-which sound input to use, then **Start broadcast**. ffmpeg records the screen
-and the theatre plays it as a live stream. Click 🖥️ again to stop; it also
-stops if the host leaves the theatre.
+Villavisión captures the screen itself, on the computer that runs it, so only
+the host can share. When the host clicks 🖥️ there, a small panel asks what to
+share (a whole screen or one window) and which sound to send, then **Start
+broadcast**. The theatre plays it as a live stream. Click 🖥️ again to stop; it
+also stops if the host leaves the theatre or the shared window is closed.
 
 - Everyone sees it about 6 seconds behind, and in sync with each other. Good
   for watching something together, slow for pointing at things as you talk.
 - It works for any number of viewers and on phones, because it travels the
   same way the film does.
-- **Sound:** pick a sound input in the panel. A microphone works as is. To
-  send the computer's own sound on a Mac, install a virtual audio device such
-  as [BlackHole](https://github.com/ExistentialAudio/BlackHole) and pick it; on
-  Windows pick "Stereo Mix" if your sound card offers it.
+- **On a Mac** a small helper (`server/native/vv-capture.swift`) uses
+  ScreenCaptureKit, the system framework OBS uses. It captures a single window
+  even when other windows cover it, windows on other desktops, and the
+  **computer's own sound** with no extra driver. Villavisión compiles the
+  helper by itself the first time it starts; that needs Apple's command line
+  tools (`xcode-select --install`). Without them you can still share whole
+  screens, with a microphone or a virtual device such as
+  [BlackHole](https://github.com/ExistentialAudio/BlackHole) for sound.
+- **A browser tab** is shared by picking its browser window.
+- **Sound:** "Computer sound" with a whole screen sends everything the computer
+  plays, including the voices of people in the theatre, who then hear
+  themselves a few seconds late. Share one window to send only that app's
+  sound.
 - **macOS permission:** allow Screen Recording for the app you start
   Villavisión from (Terminal, iTerm…) in System Settings → Privacy & Security.
-  Without it macOS sends no picture and the theatre says the capture was
-  blocked.
-- Built and tested on macOS. The Windows (`gdigrab`) and Linux (`x11grab`,
-  X11 only) capture commands are written but have not been run yet.
-
-**From a browser.** People holding the remote, and the host with **Use the
-browser's sharing instead**, share through the browser's own picker. It has
-almost no delay.
-
-- **Sound:** browsers can only capture sound from a *browser tab* (tick "Also
-  share tab audio"), or from the whole screen on Windows and ChromeOS. On a Mac,
-  share a tab if you need sound.
-- It works from Chrome, Edge and Firefox on a computer. Phones can watch a
-  share but cannot start one.
-- Your screen is sent directly from your computer to each viewer, so your
-  upload speed is shared between them. It suits a handful of viewers.
-- Do not use this for streaming services: they block capture, and their terms
-  do not allow it.
+  Without it the theatre says the capture was blocked.
+- **Windows and Linux:** whole-desktop capture, one window by title on Windows
+  (`gdigrab`), X11 only on Linux (`x11grab`). These commands are written but
+  have not been run yet; only macOS is tested.
+- Video protected by a streaming service shows as black, and their terms do
+  not allow sharing it.
 
 ### Subtitles
 
@@ -130,100 +127,18 @@ Subtitles inside the movie file are found automatically, and so are `.srt` or
 movie from the terminal. Picture-based subtitles (DVD and Blu-ray style) cannot
 be converted.
 
-## A fixed address on your own domain
-
-The quick-start address changes every time you start. If you manage a domain in
-a free Cloudflare account, you can have a permanent one:
-
-```bash
-npm run tunnel:setup -- movies.example.com
-```
-
-It opens Cloudflare in your browser to sign in, creates a tunnel, and adds the
-DNS record. From then on `npm run online` always uses `https://movies.example.com`.
-
-## Adding movies from the terminal
-
-```bash
-npm run add -- "/path/to/Movie.mkv" "Movie Title"
-```
-
-`--audio=1` picks a different audio track (the tool lists them).
-`--software` forces the slower software encoder on a Mac.
-
-## Settings
-
-Copy `.env.example` to `.env`. Everything is optional.
-
-| Setting | Default | Purpose |
-|---|---|---|
-| `PORT` | `4747` | Port on this computer |
-| `MEDIA_DIR` | `./media` | Where prepared movies are kept |
-| `PUBLIC_URL` | | Your fixed public address |
-| `TURN_URLS`, `TURN_USERNAME`, `TURN_CREDENTIAL` | | Relay for voice, webcam and screen sharing on strict networks |
-| `MAX_UPLOAD_GB` | `50` | Largest file the host page accepts |
-| `ALLOW_REMOTE_HOST`, `HOST` | off, `127.0.0.1` | For running on a remote server; see Security |
-
-## Security
-
-What protects your theatre:
-
-- **The theatre link is the ticket.** Each link contains a long random code.
-  Anyone who has the link can join, so share it only with your guests. Closing
-  a theatre on the host page makes its link stop working at once.
-- **Host powers work only on your computer.** The host page and everything it
-  can do (adding and removing movies, opening and closing theatres, being the
-  host) are refused for any request that arrives through the public address,
-  even with the correct host key.
-- **Movies are reachable only through an open theatre's link,** never directly.
-- **No ports are opened on your router.** The public address is an outbound,
-  encrypted tunnel that exists only while `npm run online` is running.
-- The server limits message rates and sizes, rejects cross-site connections,
-  and sends strict browser security headers.
-
-What to be aware of:
-
-- **Guests are not individually authenticated.** There are no accounts. A
-  guest could forward the link. Up to 16 people fit in a theatre, and you see
-  everyone who is seated.
-- **Voice, webcams and screen sharing connect viewers directly to each other,**
-  which means people in the same theatre can learn each other's IP addresses,
-  as in most video calls. A TURN relay (see Settings) avoids that for the
-  people who connect through it.
-- **Text chat and playback go through your computer** and, when online,
-  through Cloudflare's network, which carries the traffic encrypted to and from
-  each viewer.
-- The host key is stored in `data/state.json`. Delete that file to make a new
-  one; this also closes all theatres.
-- Running on a remote server with `ALLOW_REMOTE_HOST=1` makes the host key the
-  only protection for the host page. Put it behind https and keep the key
-  secret.
-
-Found a security problem? Please report it privately to the maintainer rather
-than in a public issue.
-
-## Troubleshooting
-
-- **Someone can't be heard or seen, or sees a black screen share.** Their
-  network blocks direct connections. Add a TURN relay in `.env`.
-- **The picture keeps catching up or looks soft for one person.** Their
-  connection is slow; the player has switched to the light version.
-- **"Tap to start the sound" appears.** Browsers require one tap before a page
-  may play sound.
-- **Microphone, camera and screen sharing are unavailable.** Browsers allow
-  them only on `https` addresses and on `localhost`.
-- **"Could not capture the screen" when starting a broadcast.** On a Mac, allow
-  Screen Recording for the app that started Villavisión, then start it again.
-- **A brand-new fixed address does not load.** New DNS records can take a
-  minute or two.
-
 ## How it works
 
 ```
 server/room.js          one theatre: shared clock, seats, roles, chat, share state
 server/index.js         web server, WebSocket endpoint, library, uploads
 server/ingest.js        ffmpeg: movie file -> adaptive HLS + WebVTT subtitles
-server/capture.js       ffmpeg: this computer's screen -> short live HLS stream
+server/capture.js       this computer's screen or one window -> short live HLS stream
+server/native/          macOS helpers, compiled on first start: screen capture, virtual machine
+server/workspace.js     the shared computer (unfinished, off unless SHARED_COMPUTER=1): setup, start, stop
+server/vm/user-data     what gets installed inside the shared computer
+server/rfb.js           drops keys and clicks from people who may only watch it
+server/deskaudio.js     passes the shared computer's sound and video stream on to the theatre
 server/tunnel*.js       Cloudflare Tunnel (temporary or fixed address)
 public/                 the theatre and host pages (plain HTML, CSS and JS)
 test/                   tests for the theatre logic (npm test)
@@ -232,9 +147,10 @@ test/                   tests for the theatre logic (npm test)
 The server keeps one clock per theatre: "playing since time T from position P".
 Each player measures its offset to the server's clock, works out where the
 movie should be right now, and nudges its playback speed by a few percent to
-stay there, jumping only when it is more than about a second off. Voice, webcam
-and screen sharing use WebRTC between browsers; the server only relays their
-handshake messages.
+stay there, jumping only when it is more than about a second off. Voice and
+webcam use WebRTC between browsers; the server only relays their handshake
+messages. A shared screen travels the way the film does, as a live stream from
+the server.
 
 ## License
 

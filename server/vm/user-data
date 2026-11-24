@@ -1,0 +1,139 @@
+#cloud-config
+# First-boot setup for the Villavisión workspace: a small Linux desktop with a
+# web browser, reached through a display server instead of a real screen.
+# It runs once to build a master disk; every workspace starts as a copy of it.
+hostname: villavision
+users:
+  - name: guest
+    gecos: Guest
+    shell: /bin/bash
+    lock_passwd: true
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+package_update: true
+package_upgrade: false
+packages:
+  - tigervnc-standalone-server
+  - dbus-x11
+  - xfce4-session
+  - xfwm4
+  - xfce4-panel
+  - xfdesktop4
+  - xfce4-settings
+  - xfce4-terminal
+  - thunar
+  - mousepad
+  - chromium
+  - pulseaudio
+  - pulseaudio-utils
+  - ffmpeg
+  - fonts-dejavu
+  - fonts-noto-color-emoji
+  - adwaita-icon-theme
+  - git
+  - curl
+  - ca-certificates
+  - nano
+  - iproute2
+write_files:
+  - path: /usr/local/bin/vv-desktop
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      # The desktop: a virtual screen (Xvnc) with Xfce on it, and a sound
+      # card that exists only to be listened to from the theatre.
+      export DISPLAY=:1 XFCE_PANEL_MIGRATE_DEFAULT=1
+      export XDG_RUNTIME_DIR=/tmp/vv-run
+      mkdir -p -m 700 "$XDG_RUNTIME_DIR"
+      pulseaudio --start --exit-idle-time=-1 --log-target=syslog
+      pactl load-module module-null-sink sink_name=theatre sink_properties=device.description=Theatre
+      pactl set-default-sink theatre
+      /usr/local/bin/vv-sound &
+      /usr/local/bin/vv-picture &
+      Xvnc :1 -geometry 1600x900 -depth 24 -rfbport 5901 -SecurityTypes None \
+        -AlwaysShared -AcceptSetDesktopSize=0 -desktop Villavision &
+      for i in $(seq 1 50); do [ -e /tmp/.X11-unix/X1 ] && break; sleep 0.2; done
+      xset s off -dpms 2>/dev/null
+      exec dbus-launch --exit-with-session startxfce4
+  - path: /usr/local/bin/vv-sound
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      # Everything the desktop plays, as a live AAC stream on port 5902 for
+      # the host to pass on. One listener at a time; start again when it leaves.
+      while :; do
+        ffmpeg -hide_banner -loglevel error -fflags nobuffer -f pulse -fragment_size 2048 -i theatre.monitor \
+          -ac 2 -ar 48000 -c:a aac -b:a 160k \
+          -f mp4 -movflags empty_moov+default_base_moof+frag_every_frame -frag_duration 100000 -flush_packets 1 \
+          -listen 1 tcp://0.0.0.0:5902
+        sleep 0.5
+      done
+  - path: /usr/local/bin/vv-picture
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      # The screen and its sound together as a live H.264 stream on port 5903,
+      # for people who are watching rather than using the computer. It only
+      # encodes while the host is connected, and starts again when it leaves.
+      while :; do
+        ffmpeg -hide_banner -loglevel error -fflags nobuffer \
+          -f x11grab -framerate 30 -draw_mouse 1 -thread_queue_size 64 -i :1 \
+          -f pulse -fragment_size 2048 -thread_queue_size 64 -i theatre.monitor \
+          -c:v libx264 -preset ultrafast -tune zerolatency -profile:v baseline -level 4.0 -pix_fmt yuv420p \
+          -g 15 -b:v 4000k -maxrate 4500k -bufsize 2250k \
+          -ac 2 -ar 48000 -c:a aac -b:a 160k \
+          -f mp4 -movflags empty_moov+default_base_moof+frag_keyframe -flush_packets 1 \
+          -listen 1 tcp://0.0.0.0:5903
+        sleep 0.5
+      done
+  - path: /etc/systemd/system/vv-desktop.service
+    content: |
+      [Unit]
+      Description=Villavision desktop
+      After=network-online.target
+      [Service]
+      User=guest
+      WorkingDirectory=/home/guest
+      Environment=HOME=/home/guest
+      ExecStart=/usr/local/bin/vv-desktop
+      Restart=always
+      RestartSec=2
+      [Install]
+      WantedBy=multi-user.target
+  - path: /usr/local/bin/vv-report
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      # Tells the host, over the serial console, where the desktop is.
+      while :; do
+        ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+        if [ -n "$ip" ] && ss -ltn 2>/dev/null | grep -q ':5901 '; then
+          echo "VV-READY $ip" > /dev/hvc0
+        else
+          echo "VV-WAIT" > /dev/hvc0
+        fi
+        sleep 2
+      done
+  - path: /etc/systemd/system/vv-report.service
+    content: |
+      [Unit]
+      Description=Villavision status reporter
+      [Service]
+      ExecStart=/usr/local/bin/vv-report
+      Restart=always
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/chromium.d/villavision
+    content: |
+      # No first-run prompts, no keyring prompt, software rendering only.
+      export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-first-run --no-default-browser-check --password-store=basic --disable-gpu"
+runcmd:
+  - [sh, -c, "echo VV-STEP packages-installed > /dev/hvc0"]
+  - [systemctl, daemon-reload]
+  - [systemctl, enable, vv-desktop.service, vv-report.service]
+  - [sh, -c, "apt-get clean; rm -rf /var/lib/apt/lists/*"]
+  - [sh, -c, "echo VV-BUILT > /dev/hvc0"]
+power_state:
+  mode: poweroff
+  message: Villavision setup finished
+  timeout: 30
+  condition: true

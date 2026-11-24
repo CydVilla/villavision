@@ -15,11 +15,14 @@ const T = {
     micDenied: 'Microphone or camera was blocked. Allow it in your browser to use this.', needHttps: 'Voice and camera need a secure (https) link.',
     invite: 'Invite link', show: 'Show', hide: 'Hide', copy: 'Copy', copied: 'Copied ✓', inviteLocal: 'This theatre is not online yet, so this link only works on this computer.',
     subsOff: 'Subtitles off', subsOn: 'Subtitles: {label}',
-    live: '● LIVE · {name} is sharing their screen', shareBusy: 'Someone else is already sharing.', shareUnsupported: 'This browser can’t share a screen. Use Chrome, Edge or Firefox on a computer.',
-    castTitle: 'Share this computer’s screen', castScreen: 'Screen', castSound: 'Sound', castNoSound: 'No sound', castStart: 'Start broadcast', castStarting: 'Starting…', castBrowser: 'Use the browser’s sharing instead',
+    live: '● LIVE · {name} is sharing their screen',
+    deskOpen: '🖥 Start a shared computer', deskStarting: 'Starting the computer…', deskHint: 'A private Linux desktop with a web browser. It runs on this computer but shares none of its files, and it is erased when you shut it down.', deskSetup: 'To use a shared computer, set it up once on the host page.',
+    deskLive: '● The shared computer · {who}', deskYou: 'you can use it', deskWatch: 'watching', deskStop: 'Shut down the shared computer? Everything on it is erased.', deskFailed: 'The shared computer could not start ({reason}).',
+    castTitle: 'Share this computer’s screen', castScreen: 'Share', castScreens: 'Screens', castWindows: 'Windows', castScreenN: 'Whole screen {n}', castSound: 'Sound', castNoSound: 'No sound', castSystem: 'Computer sound', castMic: 'Microphone',
+    castGone: 'That window or screen is no longer there. Pick again.', castBuilding: 'Single windows and computer sound are still being set up. Try again in a minute.', castNoSwift: 'To share single windows and computer sound on a Mac, install Apple’s command line tools (run: xcode-select --install) and restart Villavisión.',
+    castUnavailable: 'Screen sharing is not available on this computer.', castStart: 'Start broadcast', castStarting: 'Starting…',
     castDelay: 'Captured by Villavisión on this computer. Everyone sees it a few seconds behind, in sync.', castFailed: 'Could not capture the screen ({reason}).',
     castPermission: 'The system blocked the capture. On a Mac, allow Screen Recording for the app that runs Villavisión in System Settings → Privacy & Security, then try again.',
-    shareNoAudio: 'Sharing without sound. To include sound, share a browser tab and tick “Also share tab audio”.',
   },
   es: {
     chat: 'Chat', send: 'Enviar', say: 'Escribe algo…', name: 'Tu nombre', sit: 'Tomar asiento',
@@ -32,11 +35,14 @@ const T = {
     micDenied: 'El micrófono o la cámara están bloqueados. Permítelos en tu navegador.', needHttps: 'La voz y la cámara necesitan un enlace seguro (https).',
     invite: 'Enlace de invitación', show: 'Mostrar', hide: 'Ocultar', copy: 'Copiar', copied: 'Copiado ✓', inviteLocal: 'Esta sala aún no está en línea; este enlace solo funciona en esta computadora.',
     subsOff: 'Subtítulos apagados', subsOn: 'Subtítulos: {label}',
-    live: '● EN VIVO · {name} comparte su pantalla', shareBusy: 'Otra persona ya está compartiendo.', shareUnsupported: 'Este navegador no puede compartir pantalla. Usa Chrome, Edge o Firefox en una computadora.',
-    castTitle: 'Compartir la pantalla de esta computadora', castScreen: 'Pantalla', castSound: 'Sonido', castNoSound: 'Sin sonido', castStart: 'Empezar a transmitir', castStarting: 'Empezando…', castBrowser: 'Usar el compartir del navegador',
+    live: '● EN VIVO · {name} comparte su pantalla',
+    deskOpen: '🖥 Iniciar una computadora compartida', deskStarting: 'Iniciando la computadora…', deskHint: 'Un escritorio Linux privado con navegador web. Funciona en esta computadora pero no comparte sus archivos, y se borra al apagarla.', deskSetup: 'Para usar una computadora compartida, prepárala una vez en la página del anfitrión.',
+    deskLive: '● La computadora compartida · {who}', deskYou: 'puedes usarla', deskWatch: 'mirando', deskStop: '¿Apagar la computadora compartida? Se borra todo lo que hay en ella.', deskFailed: 'No se pudo iniciar la computadora compartida ({reason}).',
+    castTitle: 'Compartir la pantalla de esta computadora', castScreen: 'Compartir', castScreens: 'Pantallas', castWindows: 'Ventanas', castScreenN: 'Pantalla completa {n}', castSound: 'Sonido', castNoSound: 'Sin sonido', castSystem: 'Sonido de la computadora', castMic: 'Micrófono',
+    castGone: 'Esa ventana o pantalla ya no está. Elige otra vez.', castBuilding: 'Las ventanas individuales y el sonido de la computadora aún se están preparando. Inténtalo en un minuto.', castNoSwift: 'Para compartir ventanas individuales y el sonido de la computadora en Mac, instala las herramientas de línea de comandos de Apple (ejecuta: xcode-select --install) y reinicia Villavisión.',
+    castUnavailable: 'Compartir pantalla no está disponible en esta computadora.', castStart: 'Empezar a transmitir', castStarting: 'Empezando…',
     castDelay: 'Capturada por Villavisión en esta computadora. Todos la ven con unos segundos de retraso, sincronizados.', castFailed: 'No se pudo capturar la pantalla ({reason}).',
     castPermission: 'El sistema bloqueó la captura. En Mac, permite Grabación de pantalla para la app que ejecuta Villavisión en Ajustes del Sistema → Privacidad y seguridad, y vuelve a intentarlo.',
-    shareNoAudio: 'Compartiendo sin sonido. Para incluir sonido, comparte una pestaña del navegador y marca “Compartir audio de la pestaña”.',
   },
 };
 const lang = (navigator.language || 'en').toLowerCase().startsWith('es') ? 'es' : 'en';
@@ -148,7 +154,6 @@ function onMessage(m) {
       $('#log').textContent = '';
       m.chat.forEach(addChat);
       renderPeople(); syncPeers(); renderShare(); sendMedia(); sync();
-      if (screen) send({ type: 'share', on: true, streamId: screen.id }); // reconnected while sharing
       break;
     case 'pong': {
       const now = Date.now(), rtt = now - m.t0;
@@ -168,8 +173,6 @@ function onMessage(m) {
     case 'people': people = m.people; renderPeople(); syncPeers(); renderShare(); break;
     case 'share':
       share = m.share;
-      // The host stopped my share, or took the remote back: stop capturing.
-      if (screen && (share?.pid !== me.pid || share.kind === 'live')) { for (const track of screen.getTracks()) removeOutgoing(track); screen = null; renderMediaButtons(); }
       renderShare(); sync();
       break;
     case 'role': me.role = m.role; notice(t(m.role === 'cohost' ? 'gotRemote' : 'lostRemote'), 4000); renderShare(); break;
@@ -219,7 +222,7 @@ function tryPlay() {
   const p = video.play();
   if (p) p.then(() => ($('#resume').hidden = true)).catch((e) => { if (e.name === 'NotAllowedError') $('#resume').hidden = false; });
 }
-$('#resume').onclick = () => { $('#resume').hidden = true; if (state?.playing && !share) tryPlay(); document.querySelectorAll('.avatar video, #shareView').forEach((v) => (v.srcObject || (v.id === 'shareView' && share)) && v.play().catch(() => {})); };
+$('#resume').onclick = () => { $('#resume').hidden = true; if (state?.playing && !share) tryPlay(); document.querySelectorAll('.avatar video, #shareView').forEach((v) => (v.srcObject || (v.id === 'shareView' && share)) && v.play().catch(() => {})); if (share?.kind === 'desk') for (const m of [deskSound, deskPicture]) if (m.on) m.el.play().catch(() => {}); };
 
 // The heart of it: keep this device's video glued to the shared clock.
 function sync() {
@@ -257,7 +260,7 @@ function renderControls() {
   $('#waiting').hidden = !!share || !movie || !!movie.duration;
   $('#waiting').textContent = t(ctl ? 'waitingHost' : 'waiting');
   $('#seek').disabled = !ctl || !!share;
-  $('#shareBtn').hidden = !ctl || (!navigator.mediaDevices?.getDisplayMedia && me?.role !== 'host');
+  $('#shareBtn').hidden = me?.role !== 'host'; // the capture runs on the host's computer
   $('#playBtn').textContent = state?.playing ? '⏸' : '▶';
 }
 setInterval(() => {
@@ -421,30 +424,16 @@ function openPopover(pid, anchor) {
 }
 document.addEventListener('click', (e) => { if (!e.target.closest('#popover')) $('#popover').hidden = true; });
 
-// ---------- voice, webcam and screen sharing ----------
+// ---------- voice and webcam ----------
 // All of it travels directly between viewers (WebRTC); the room only passes
 // the handshake messages along.
 let ICE = [{ urls: ['stun:stun.cloudflare.com:3478'] }];
 const local = new MediaStream(); // my microphone + webcam
 const outgoing = new Map(); // every track I send -> the stream it belongs to
 const peers = new Map(); // pid -> { pc, sid, polite, makingOffer, ignoreOffer, streams, senders }
-let micTrack = null, camTrack = null, micOn = false, screen = null;
+let micTrack = null, camTrack = null, micOn = false;
 
 function sendMedia() { send({ type: 'media', mic: !!micTrack && micOn, cam: !!camTrack, streamId: local.id }); }
-
-function tune(sender, track) {
-  if (outgoing.get(track) !== screen || track.kind !== 'video') return;
-  const apply = () => {
-    try {
-      const params = sender.getParameters();
-      if (!params.encodings?.length) return;
-      params.encodings[0].maxBitrate = 2_500_000;
-      params.degradationPreference = 'maintain-framerate';
-      sender.setParameters(params).catch(() => {});
-    } catch {}
-  };
-  apply(); setTimeout(apply, 3000);
-}
 
 function ensurePeer(pid, sid) {
   let peer = peers.get(pid);
@@ -465,14 +454,14 @@ function ensurePeer(pid, sid) {
     refresh();
   };
   pc.oniceconnectionstatechange = () => { if (pc.iceConnectionState === 'failed') pc.restartIce(); };
-  for (const [track, stream] of outgoing) { const sender = pc.addTrack(track, stream); peer.senders.set(track, sender); tune(sender, track); }
+  for (const [track, stream] of outgoing) { const sender = pc.addTrack(track, stream); peer.senders.set(track, sender); }
   return peer;
 }
 
 // Handshake messages for one person are handled strictly one at a time. If a
 // reply and a fresh request arrive back to back, handling them in parallel
 // makes the request look like a clash and it gets dropped, leaving that
-// person's camera, microphone or shared screen never arriving.
+// person's camera or microphone never arriving.
 function onSignal(m) {
   if (!m.data || !people.some((p) => p.pid === m.from)) return Promise.resolve();
   const peer = ensurePeer(m.from, m.sid);
@@ -512,7 +501,7 @@ function addOutgoing(track, stream) {
   for (const p of people) {
     if (p.pid === me.pid) continue;
     const peer = ensurePeer(p.pid, p.sid);
-    if (!peer.senders.has(track)) { const sender = peer.pc.addTrack(track, stream); peer.senders.set(track, sender); tune(sender, track); }
+    if (!peer.senders.has(track)) { const sender = peer.pc.addTrack(track, stream); peer.senders.set(track, sender); }
   }
 }
 function removeOutgoing(track) {
@@ -527,7 +516,7 @@ async function capture(constraints) {
 function renderMediaButtons() {
   $('#micBtn').className = 'icon ' + (micTrack && micOn ? 'on' : 'off');
   $('#camBtn').className = 'icon ' + (camTrack ? 'on' : 'off');
-  $('#shareBtn').className = 'icon ' + (screen || (share?.kind === 'live' && share.pid === me?.pid) ? 'on' : 'off');
+  $('#shareBtn').className = 'icon ' + (share?.kind === 'live' && share.pid === me?.pid ? 'on' : 'off');
 }
 $('#micBtn').onclick = async () => {
   if (!micTrack) {
@@ -546,74 +535,209 @@ $('#camBtn').onclick = async () => {
   renderMediaButtons(); sendMedia(); attachStreams();
 };
 
-// Screen sharing: put a window, a browser tab or the whole screen on the big
-// screen for everyone, live. Only the host and people holding the remote can.
+// Screen sharing: the host puts a whole screen or one window on the big screen
+// for everyone, live. Villavisión captures it itself, on the host's computer.
 $('#shareBtn').onclick = async () => {
   if (!$('#cast').hidden) return closeCast();
-  if (screen) return stopShare();
-  if (share?.kind === 'live' && me.role === 'host') return send({ type: 'share', on: false });
-  if (share && share.pid !== me.pid) return notice(t('shareBusy'), 4000);
-  // On the host computer Villavisión captures the screen itself.
-  if (me.role === 'host') {
-    const sources = await api('/api/capture').then((r) => (r.ok ? r.json() : null)).catch(() => null);
-    if (sources?.supported) return openCast(sources);
-  }
-  browserShare();
+  if (me.role !== 'host') return;
+  if (share?.kind === 'live') return send({ type: 'share', on: false });
+  if (share?.kind === 'desk') { if (confirm(t('deskStop'))) send({ type: 'share', on: false }); return; }
+  const [sources, desk] = await Promise.all(['/api/capture', '/api/workspace'].map((u) => api(u).then((r) => (r.ok ? r.json() : null)).catch(() => null)));
+  if (sources?.supported) return openCast(sources, desk);
+  notice(t(sources?.note === 'no_permission' ? 'castPermission' : 'castUnavailable'), 9000);
 };
-async function browserShare() {
-  if (!navigator.mediaDevices?.getDisplayMedia) return notice(t('shareUnsupported'), 5000);
-  let stream;
-  try {
-    stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: { ideal: 30, max: 30 }, width: { max: 1920 }, height: { max: 1080 } },
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-      systemAudio: 'include',
-    });
-  } catch { return; } // they cancelled the picker
-  if (!canControl() || (share && share.pid !== me.pid)) { stream.getTracks().forEach((tr) => tr.stop()); return; }
-  screen = stream;
-  for (const track of stream.getTracks()) {
-    if (track.kind === 'video') { track.contentHint = 'motion'; track.addEventListener('ended', stopShare); }
-    addOutgoing(track, stream);
-  }
-  send({ type: 'share', on: true, streamId: stream.id });
-  if (!stream.getAudioTracks().length) notice(t('shareNoAudio'), 7000);
-  renderMediaButtons(); renderShare();
-}
 
 // Villavisión's own capture: the server on this computer records the screen
-// and broadcasts it to the theatre. Only offered to the host, on that computer.
+// and broadcasts it to the theatre.
 const api = (path, opts = {}) => fetch(path, { ...opts, headers: { 'x-host-key': store.get('vv.hostKey') || '', 'content-type': 'application/json' } });
 const closeCast = () => { $('#cast').hidden = true; };
-function openCast(sources) {
+function openCast(sources, desk) {
   const make = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
-  const pick = (key, items) => {
-    const sel = make('select', {}, ...items.map((i) => make('option', { value: i.id, textContent: i.label })));
+  const option = (i, text) => make('option', { value: i.id, textContent: i.label ?? text });
+  const remember = (sel, key) => {
     const saved = store.get(key);
-    if (saved !== null && items.some((i) => i.id === saved)) sel.value = saved;
+    if (saved !== null && [...sel.options].some((o) => o.value === saved)) sel.value = saved;
     sel.onchange = () => store.set(key, sel.value);
     return sel;
   };
-  const screenSel = pick('vv.castScreen', sources.screens);
-  const soundSel = pick('vv.castSound', [{ id: '', label: t('castNoSound') }, ...sources.audio]);
+  const windows = sources.windows || [];
+  const sourceSel = remember(make('select', {},
+    make('optgroup', { label: t('castScreens') }, ...sources.screens.map((i) => option(i, t('castScreenN', { n: i.n ?? 1 })))),
+    ...(windows.length ? [make('optgroup', { label: t('castWindows') }, ...windows.map((i) => option(i, '')))] : [])), 'vv.castSource');
+  const soundSel = remember(make('select', {}, make('option', { value: '', textContent: t('castNoSound') }),
+    ...sources.audio.map((i) => option(i, t(i.id === 'system' ? 'castSystem' : 'castMic')))), 'vv.castSound');
   const start = make('button', { className: 'go', textContent: t('castStart') });
-  const other = make('button', { textContent: t('castBrowser') });
-  other.hidden = !navigator.mediaDevices?.getDisplayMedia;
-  other.onclick = () => { closeCast(); browserShare(); };
   start.onclick = async () => {
     start.disabled = true; start.textContent = t('castStarting');
-    const r = await api(`/api/rooms/${roomId}/broadcast`, { method: 'POST', body: JSON.stringify({ screen: screenSel.value, audio: soundSel.value === '' ? null : soundSel.value, pid: me.pid }) }).catch(() => null);
+    const r = await api(`/api/rooms/${roomId}/broadcast`, { method: 'POST', body: JSON.stringify({ source: sourceSel.value, audio: soundSel.value === '' ? null : soundSel.value, pid: me.pid }) }).catch(() => null);
     if (r?.ok) return closeCast();
     const reason = (await r?.json().catch(() => null))?.error || 'offline';
     start.disabled = false; start.textContent = t('castStart');
-    notice(reason === 'no_permission' ? t('castPermission') : t('castFailed', { reason }), 9000);
+    notice(reason === 'no_permission' ? t('castPermission') : reason === 'source_gone' ? t('castGone') : t('castFailed', { reason }), 9000);
+    if (reason === 'source_gone') closeCast();
   };
+  const hint = sources.note === 'building' ? t('castBuilding') : sources.note === 'no_swift' ? t('castNoSwift') : t('castDelay');
   $('#cast').replaceChildren(
     make('strong', { textContent: t('castTitle') }),
-    make('label', {}, make('span', { textContent: t('castScreen') }), screenSel),
+    make('label', {}, make('span', { textContent: t('castScreen') }), sourceSel),
     make('label', {}, make('span', { textContent: t('castSound') }), soundSel),
-    start, other, make('small', { textContent: t('castDelay') }));
+    start, make('small', { textContent: hint }));
+  // The shared computer: its own Linux desktop, for when the thing to share is a place to work together.
+  if (desk && ['ready', 'idle', 'downloading', 'building'].includes(desk.state)) {
+    const open = make('button', { textContent: t('deskOpen') });
+    open.disabled = desk.state !== 'ready';
+    open.onclick = async () => {
+      open.disabled = true; open.textContent = t('deskStarting');
+      const r = await api(`/api/rooms/${roomId}/desk`, { method: 'POST', body: JSON.stringify({ pid: me.pid }) }).catch(() => null);
+      if (r?.ok) return closeCast();
+      open.disabled = false; open.textContent = t('deskOpen');
+      notice(t('deskFailed', { reason: (await r?.json().catch(() => null))?.error || 'offline' }), 9000);
+    };
+    $('#cast').append(make('hr'), open, make('small', { textContent: t(desk.state === 'ready' ? 'deskHint' : 'deskSetup') }));
+  }
   $('#cast').hidden = false;
+}
+
+// The shared computer. Two ways to see it, chosen by what you are doing:
+//  - using it (you hold the remote): its screen is drawn by noVNC over a
+//    connection the server bridges to the machine, so it answers instantly,
+//    and its sound arrives as a separate low-delay stream;
+//  - watching: the screen and sound arrive together as one video stream, which
+//    stays smooth on a slow connection.
+// Whether your keys and clicks reach the machine is decided by the server.
+const SOUND_TYPE = 'audio/mp4; codecs="mp4a.40.2"', PICTURE_TYPE = 'video/mp4; codecs="avc1.42E028, mp4a.40.2"';
+const LiveSource = window.ManagedMediaSource || window.MediaSource;
+
+// Plays a live run of small MP4 pieces from the server in a media element,
+// staying within `lag` seconds of "now".
+function liveStream(el, path, type, lag) {
+  const st = { sock: null, source: null, buffer: null, queue: [], retry: null, clock: null, on: false };
+  const feed = () => {
+    const { buffer, queue } = st;
+    if (!buffer || buffer.updating) return;
+    try {
+      // Forget what has already played, so the player never fills up.
+      if (buffer.buffered.length && el.currentTime - buffer.buffered.start(0) > 20) return buffer.remove(0, el.currentTime - 5);
+      if (queue.length) buffer.appendBuffer(queue.shift());
+    } catch { st.queue = []; }
+  };
+  const reset = () => {
+    const source = new LiveSource();
+    st.source = source; st.buffer = null; st.queue = [];
+    if (window.ManagedMediaSource) el.disableRemotePlayback = true;
+    el.src = URL.createObjectURL(source);
+    source.addEventListener('sourceopen', () => {
+      if (st.source !== source) return;
+      const buffer = source.addSourceBuffer(type);
+      buffer.mode = 'sequence'; // play pieces one after another, whatever their timestamps
+      buffer.addEventListener('updateend', feed);
+      st.buffer = buffer;
+      feed();
+    });
+    el.play().catch(() => ($('#resume').hidden = false));
+  };
+  const connect = () => {
+    clearTimeout(st.retry);
+    if (!st.on) return;
+    reset();
+    const sock = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}?room=${roomId}`);
+    sock.binaryType = 'arraybuffer';
+    st.sock = sock;
+    sock.onopen = () => sock.send(me.ticket);
+    sock.onmessage = (e) => {
+      if (st.sock !== sock) return;
+      if (typeof e.data === 'string') { if (e.data === 'restart') reset(); return; }
+      if (st.queue.length > 300) st.queue.splice(0, 200); // far behind: skip ahead
+      st.queue.push(e.data);
+      feed();
+    };
+    sock.onclose = () => { if (st.sock === sock && st.on) st.retry = setTimeout(connect, 1500); };
+  };
+  return {
+    el,
+    get on() { return st.on; },
+    start() {
+      if (st.on) return;
+      st.on = true;
+      connect();
+      st.clock = setInterval(() => {
+        const { buffer } = st;
+        if (!buffer || !buffer.buffered.length) return;
+        const end = buffer.buffered.end(buffer.buffered.length - 1), behind = end - el.currentTime;
+        el.dataset.behind = behind.toFixed(2); // for troubleshooting
+        // Pieces arrive in bursts, so some slack is normal. Only act when it is
+        // clearly behind: catch up gently, or jump if it is far off. Changing
+        // speed makes the player hiccup, so leave it alone otherwise.
+        if (behind > lag * 4 || behind < 0) el.currentTime = Math.max(0, end - lag);
+        else if (behind > lag * 2.5) { if (el.playbackRate === 1) el.playbackRate = 1.06; }
+        else if (behind < lag * 1.5 && el.playbackRate !== 1) el.playbackRate = 1;
+        if (el.paused) el.play().catch(() => {});
+      }, 500);
+    },
+    stop() {
+      if (!st.on) return;
+      st.on = false;
+      clearTimeout(st.retry); clearInterval(st.clock);
+      if (st.sock) { const s = st.sock; st.sock = null; s.close(); }
+      st.source = st.buffer = null; st.queue = [];
+      el.removeAttribute('src'); el.load();
+    },
+  };
+}
+const deskSound = liveStream(new Audio(), '/desksound', SOUND_TYPE, 0.12);
+const deskPicture = liveStream($('#deskVideo'), '/deskpicture', PICTURE_TYPE, 0.5); // its pieces are half a second long
+for (const m of [deskSound, deskPicture]) m.el.addEventListener('playing', () => { if (share?.kind === 'desk') $('#resume').hidden = true; });
+
+let rfb = null, deskV = null, deskMode = null, deskRetry = null;
+function dropDeskScreen() {
+  clearTimeout(deskRetry);
+  if (rfb) { const old = rfb; rfb = null; try { old.disconnect(); } catch {} }
+  $('#deskView').replaceChildren();
+}
+function showDesk(v) {
+  const mode = canControl() || !LiveSource?.isTypeSupported(PICTURE_TYPE) ? 'use' : 'watch';
+  for (const el of [deskSound.el, deskPicture.el]) { el.volume = video.volume; el.muted = video.muted; }
+  if (deskV === v && deskMode === mode) { if (rfb) rfb.viewOnly = !canControl(); return; }
+  deskV = v; deskMode = mode;
+  $('#deskView').hidden = mode !== 'use';
+  $('#deskVideo').hidden = mode !== 'watch';
+  if (mode === 'use') {
+    deskPicture.stop();
+    connectDesk();
+    if (LiveSource?.isTypeSupported(SOUND_TYPE)) deskSound.start();
+  } else {
+    dropDeskScreen();
+    deskSound.stop();
+    deskPicture.start();
+  }
+}
+function hideDesk() {
+  if (deskV === null) return;
+  deskV = deskMode = null;
+  dropDeskScreen();
+  deskSound.stop(); deskPicture.stop();
+  $('#deskView').hidden = $('#deskVideo').hidden = true;
+}
+async function connectDesk() {
+  dropDeskScreen();
+  const v = deskV;
+  if (v === null || deskMode !== 'use') return;
+  const again = () => { if (deskV === v && deskMode === 'use' && !rfb) { clearTimeout(deskRetry); deskRetry = setTimeout(connectDesk, 1500); } };
+  try {
+    const { default: RFB } = await import('/vendor/novnc/core/rfb.js');
+    const sock = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/desk?room=${roomId}`);
+    sock.binaryType = 'arraybuffer';
+    await new Promise((resolve, reject) => { sock.onopen = resolve; sock.onerror = sock.onclose = reject; });
+    if (deskV !== v || deskMode !== 'use') return sock.close();
+    sock.send(me.ticket); // who I am; the server decides what I may do
+    const screenView = new RFB($('#deskView'), sock, { shared: true });
+    screenView.scaleViewport = true;
+    screenView.background = '#000';
+    screenView.viewOnly = !canControl();
+    screenView.focusOnClick = true;
+    screenView.addEventListener('disconnect', () => { if (rfb === screenView) { rfb = null; again(); } });
+    rfb = screenView;
+  } catch { again(); }
 }
 
 // Playing someone's captured screen. Viewers hold the same few seconds behind
@@ -658,27 +782,19 @@ setInterval(() => {
   if (late > 8 && liveHls.liveSyncPosition) view.currentTime = liveHls.liveSyncPosition;
   else view.playbackRate = Math.abs(late) < 0.15 ? 1 : clamp(1 + late * 0.2, 0.9, ahead > 1.5 ? 1.1 : 1);
 }, 1000);
-function stopShare() {
-  if (!screen) return;
-  for (const track of screen.getTracks()) removeOutgoing(track);
-  screen = null;
-  send({ type: 'share', on: false });
-  renderMediaButtons(); renderShare();
-}
 function renderShare() {
   const view = $('#shareView');
   const mine = !!share && share.pid === me?.pid;
-  const live = share?.kind === 'live';
-  const stream = !share || live ? null : mine ? screen : peers.get(share.pid)?.streams.get(share.streamId) || null;
+  const live = share?.kind === 'live', desk = share?.kind === 'desk';
+  if (desk) showDesk(share.v); else hideDesk();
   if (live) playLive(share.v); else stopLive();
   if (share) closeCast();
   renderMediaButtons();
   document.body.classList.toggle('sharing', !!share);
-  view.hidden = !share;
+  view.hidden = !share || desk;
   view.muted = mine || video.muted;
   view.volume = video.volume;
-  if (!live && view.srcObject !== stream) { view.srcObject = stream; if (stream) view.play().catch(() => ($('#resume').hidden = false)); }
   $('#live').hidden = !share;
-  if (share) $('#live').textContent = t('live', { name: people.find((p) => p.pid === share.pid)?.name || '' });
+  if (share) $('#live').textContent = desk ? t('deskLive', { who: t(canControl() ? 'deskYou' : 'deskWatch') }) : t('live', { name: people.find((p) => p.pid === share.pid)?.name || '' });
   renderControls();
 }

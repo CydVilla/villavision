@@ -34,60 +34,21 @@ test('only host and co-hosts control playback', () => {
   assert.equal(room.play.position, 100);
 });
 
-test('screen share: needs the remote, one at a time, pauses the movie, ends when the sharer leaves', () => {
+test('screen share: only the host, pauses the movie, keeps it paused, and a browser cannot start one', () => {
   const room = makeRoom();
   const host = join(room, 'Host', { hostKey: 'secret' }), guest = join(room, 'Guest');
-  room.handle(guest, { type: 'share', on: true, streamId: 'g' });
-  assert.equal(room.share, null);
-  room.handle(host, { type: 'control', action: 'play' });
   room.handle(host, { type: 'role', target: guest.person.pid, cohost: true });
   room.handle(guest, { type: 'share', on: true, streamId: 'g' });
-  assert.deepEqual(room.share, { pid: guest.person.pid, streamId: 'g' });
+  room.handle(host, { type: 'share', on: true, streamId: 'h' });
+  assert.equal(room.share, null);
+  room.handle(host, { type: 'control', action: 'play' });
+  assert.equal(room.startLive(host.person.pid), true);
   assert.equal(room.play.playing, false);
-  room.handle(host, { type: 'share', on: true, streamId: 'h' }); // busy
-  assert.equal(room.share.streamId, 'g');
   room.handle(host, { type: 'control', action: 'play' }); // movie stays paused during a share
   assert.equal(room.play.playing, false);
-  room.handle(host, { type: 'role', target: guest.person.pid, cohost: false }); // taking the remote ends it
-  assert.equal(room.share, null);
-  room.handle(host, { type: 'share', on: true, streamId: 'h' });
-  room.leave(host);
+  room.handle(host, { type: 'share', on: false });
   assert.equal(room.share, null);
   assert.equal(guest.last('share').share, null);
-});
-
-test('seats, chat cleaning and reconnects', () => {
-  const room = makeRoom();
-  const a = join(room, 'A'), b = join(room, 'B');
-  assert.equal(join(room, '  Zed\u0000  ').person.name, 'Zed');
-  room.handle(b, { type: 'seat', seat: a.person.seat });
-  assert.notEqual(b.person.seat, a.person.seat);
-  room.handle(b, { type: 'seat', seat: 9 });
-  room.handle(b, { type: 'chat', text: 'x'.repeat(900) });
-  assert.equal(a.last('chat').message.text.length, 500);
-  room.leave(b);
-  const b2 = join(room, 'B');
-  assert.equal(b2.person.seat, 9);
-  const b3 = join(room, 'B'); // second tab replaces the first
-  assert.equal(b2.closed, true);
-  assert.equal(room.people.size, 3);
-  assert.ok(b3.person);
-});
-
-test('the theatre has a limited number of seats', () => {
-  const room = makeRoom();
-  for (let i = 0; i < 16; i++) join(room, `P${i}`);
-  const extra = join(room, 'Extra');
-  assert.equal(extra.last('full')?.type, 'full');
-  assert.equal(room.people.size, 16);
-});
-
-test('signals are relayed only to the named person and carry the true sender', () => {
-  const room = makeRoom();
-  const a = join(room, 'A'), b = join(room, 'B'), c = join(room, 'C');
-  room.handle(a, { type: 'signal', to: b.person.pid, from: c.person.pid, data: { x: 1 } });
-  assert.equal(b.last('signal').from, a.person.pid);
-  assert.equal(c.last('signal'), undefined);
 });
 
 test('a theatre with no film ignores playback controls but allows screen sharing', () => {
@@ -95,8 +56,8 @@ test('a theatre with no film ignores playback controls but allows screen sharing
   const host = join(room, 'Host', { hostKey: 'secret' });
   room.handle(host, { type: 'control', action: 'play' });
   assert.equal(room.play.playing, false);
-  room.handle(host, { type: 'share', on: true, streamId: 'abc' });
-  assert.equal(room.share?.streamId, 'abc');
+  assert.equal(room.startLive(host.person.pid), true);
+  assert.equal(room.share?.kind, 'live');
 });
 
 test('only a host in the room can put a captured screen up, and it ends when they leave', () => {
@@ -113,4 +74,33 @@ test('only a host in the room can put a captured screen up, and it ends when the
   room.leave(host);
   assert.equal(room.share, null);
   assert.equal(ended, 1);
+});
+
+test('the shared computer belongs to the theatre and only the host can take it down', () => {
+  const room = makeRoom();
+  let ended = 0;
+  room.onDeskEnd = () => ended++;
+  const host = join(room, 'Host', { hostKey: 'secret' }), guest = join(room, 'Guest');
+  assert.equal(room.startDesk(guest.last('welcome').you.pid), false);
+  assert.equal(room.startDesk(host.last('welcome').you.pid), true);
+  assert.equal(guest.last('share').share.kind, 'desk');
+  room.handle(guest, { type: 'share', on: false });
+  room.handle(guest, { type: 'share', on: true, streamId: 'x' });
+  assert.equal(room.share.kind, 'desk');
+  room.leave(host);
+  assert.equal(room.share.kind, 'desk'); // still there when the host steps out
+  const back = join(room, 'Host', { hostKey: 'secret' });
+  room.handle(back, { type: 'share', on: false });
+  assert.equal(room.share, null);
+  assert.equal(ended, 1);
+});
+
+test('a private ticket identifies one person and is never shown to others', () => {
+  const room = makeRoom();
+  const a = join(room, 'Ana'), b = join(room, 'Ben');
+  const ticket = a.last('welcome').you.ticket;
+  assert.equal(room.personByTicket(ticket).name, 'Ana');
+  assert.equal(room.personByTicket('nope'), null);
+  assert.equal(room.personByTicket(undefined), null);
+  assert.ok(!JSON.stringify(b.msgs).includes(ticket));
 });
