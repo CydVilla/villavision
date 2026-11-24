@@ -1,0 +1,7 @@
+node_modules/
+media/
+data/
+.env
+.claude/
+.DS_Store
+*.local

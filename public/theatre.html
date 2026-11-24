@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>Movie Night</title>
+  <link rel="stylesheet" href="/assets/theatre.css">
+</head>
+<body>
+  <div id="app" class="chat-open">
+    <main id="house">
+      <header id="marquee">
+        <span id="roomName"></span>
+        <span id="conn" class="pill" hidden></span>
+      </header>
+
+      <section id="stage">
+        <div id="fit"><div id="screen">
+          <video id="movie" playsinline preload="auto"></video>
+          <video id="shareView" playsinline autoplay hidden></video>
+          <div id="live" hidden></div>
+          <div id="reactions" aria-hidden="true"></div>
+          <div id="notice" hidden></div>
+          <button id="resume" hidden></button>
+        </div></div>
+      </section>
+
+      <section id="controls">
+        <button id="playBtn" class="icon" hidden aria-label="Play">▶</button>
+        <span id="cur" class="time">0:00</span>
+        <input id="seek" type="range" min="0" max="1000" value="0" step="1" disabled aria-label="Position">
+        <span id="dur" class="time">0:00</span>
+        <span class="sep"></span>
+        <button id="muteBtn" class="icon" aria-label="Movie volume">🔊</button>
+        <input id="vol" type="range" min="0" max="100" value="100" aria-label="Movie volume">
+        <button id="ccBtn" class="icon text" hidden>CC</button>
+        <span class="sep"></span>
+        <button id="micBtn" class="icon off" aria-label="Microphone">🎤</button>
+        <button id="camBtn" class="icon off" aria-label="Camera">📷</button>
+        <button id="shareBtn" class="icon off" aria-label="Share screen" title="Share your screen" hidden>🖥️</button>
+        <span class="sep"></span>
+        <span id="emojis"></span>
+        <span class="grow"></span>
+        <button id="chatBtn" class="icon" aria-label="Chat">💬</button>
+        <button id="fsBtn" class="icon" aria-label="Fullscreen">⛶</button>
+      </section>
+
+      <section id="seats"></section>
+    </main>
+
+    <aside id="chat">
+      <h2 data-i18n="chat"></h2>
+      <div id="log"></div>
+      <form id="chatForm">
+        <input id="chatInput" maxlength="500" autocomplete="off">
+        <button type="submit" data-i18n="send"></button>
+      </form>
+    </aside>
+  </div>
+
+  <div id="join">
+    <form id="joinForm" class="card">
+      <div class="ticket">🎟️</div>
+      <h1 id="joinTitle"></h1>
+      <p id="joinMovie"></p>
+      <input id="nameInput" maxlength="24" autocomplete="given-name" required>
+      <button type="submit" id="joinBtn"></button>
+      <p class="hint" data-i18n="headphones"></p>
+    </form>
+  </div>
+
+  <div id="popover" hidden></div>
+
+  <script src="/vendor/hls.min.js"></script>
+  <script type="module" src="/assets/theatre.js"></script>
+</body>
+</html>

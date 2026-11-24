@@ -1,0 +1,22 @@
+{
+  "name": "villavision",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted virtual movie theatre: watch your own movies in sync with family and friends, with chat, voice, webcams and screen sharing.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.12"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "online": "node server/index.js --online",
+    "add": "node server/ingest.js",
+    "tunnel:setup": "node server/tunnel-setup.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "hls.js": "^1.5.0",
+    "ws": "^8.18.0"
+  }
+}
