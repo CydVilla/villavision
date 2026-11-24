@@ -7,7 +7,7 @@ const T = {
   en: {
     chat: 'Chat', send: 'Send', say: 'Say something…', name: 'Your name', sit: 'Take your seat',
     headphones: 'Tip: wear headphones if you turn your microphone on, so the movie doesn’t echo.',
-    welcome: 'Welcome to', nowShowing: 'Now showing: {movie}', notFound: 'This theatre link is not valid. Ask your host for a new one.',
+    welcome: 'Welcome to', nowShowing: 'Now showing: {movie}', screenOnly: 'Screen sharing theatre', waiting: 'Nothing on the screen yet.', waitingHost: 'Nothing on the screen yet. Press 🖥️ to share your screen.', notFound: 'This theatre link is not valid. Ask your host for a new one.',
     joined: '{name} took a seat', left: '{name} left', played: '{name} pressed play', paused: '{name} paused', seeked: '{name} jumped to {time}',
     reconnecting: 'Reconnecting…', resume: '▶ Tap to start the sound', full: 'The theatre is full.', replaced: 'You opened this theatre in another tab.',
     giveRemote: '🎮 Give the remote', takeRemote: 'Take the remote back', theirVolume: 'Their voice volume',
@@ -15,12 +15,15 @@ const T = {
     micDenied: 'Microphone or camera was blocked. Allow it in your browser to use this.', needHttps: 'Voice and camera need a secure (https) link.',
     subsOff: 'Subtitles off', subsOn: 'Subtitles: {label}',
     live: '● LIVE · {name} is sharing their screen', shareBusy: 'Someone else is already sharing.', shareUnsupported: 'This browser can’t share a screen. Use Chrome, Edge or Firefox on a computer.',
+    castTitle: 'Share this computer’s screen', castScreen: 'Screen', castSound: 'Sound', castNoSound: 'No sound', castStart: 'Start broadcast', castStarting: 'Starting…', castBrowser: 'Use the browser’s sharing instead',
+    castDelay: 'Captured by Villavisión on this computer. Everyone sees it a few seconds behind, in sync.', castFailed: 'Could not capture the screen ({reason}).',
+    castPermission: 'The system blocked the capture. On a Mac, allow Screen Recording for the app that runs Villavisión in System Settings → Privacy & Security, then try again.',
     shareNoAudio: 'Sharing without sound. To include sound, share a browser tab and tick “Also share tab audio”.',
   },
   es: {
     chat: 'Chat', send: 'Enviar', say: 'Escribe algo…', name: 'Tu nombre', sit: 'Tomar asiento',
     headphones: 'Consejo: usa audífonos si enciendes el micrófono, para que la película no haga eco.',
-    welcome: 'Bienvenidos a', nowShowing: 'En cartelera: {movie}', notFound: 'Este enlace no es válido. Pídele uno nuevo al anfitrión.',
+    welcome: 'Bienvenidos a', nowShowing: 'En cartelera: {movie}', screenOnly: 'Sala para compartir pantalla', waiting: 'Todavía no hay nada en la pantalla.', waitingHost: 'Todavía no hay nada en la pantalla. Pulsa 🖥️ para compartir la tuya.', notFound: 'Este enlace no es válido. Pídele uno nuevo al anfitrión.',
     joined: '{name} tomó asiento', left: '{name} salió', played: '{name} puso play', paused: '{name} pausó', seeked: '{name} saltó a {time}',
     reconnecting: 'Reconectando…', resume: '▶ Toca para activar el sonido', full: 'La sala está llena.', replaced: 'Abriste esta sala en otra pestaña.',
     giveRemote: '🎮 Dar el control', takeRemote: 'Quitar el control', theirVolume: 'Volumen de su voz',
@@ -28,6 +31,9 @@ const T = {
     micDenied: 'El micrófono o la cámara están bloqueados. Permítelos en tu navegador.', needHttps: 'La voz y la cámara necesitan un enlace seguro (https).',
     subsOff: 'Subtítulos apagados', subsOn: 'Subtítulos: {label}',
     live: '● EN VIVO · {name} comparte su pantalla', shareBusy: 'Otra persona ya está compartiendo.', shareUnsupported: 'Este navegador no puede compartir pantalla. Usa Chrome, Edge o Firefox en una computadora.',
+    castTitle: 'Compartir la pantalla de esta computadora', castScreen: 'Pantalla', castSound: 'Sonido', castNoSound: 'Sin sonido', castStart: 'Empezar a transmitir', castStarting: 'Empezando…', castBrowser: 'Usar el compartir del navegador',
+    castDelay: 'Capturada por Villavisión en esta computadora. Todos la ven con unos segundos de retraso, sincronizados.', castFailed: 'No se pudo capturar la pantalla ({reason}).',
+    castPermission: 'El sistema bloqueó la captura. En Mac, permite Grabación de pantalla para la app que ejecuta Villavisión en Ajustes del Sistema → Privacidad y seguridad, y vuelve a intentarlo.',
     shareNoAudio: 'Compartiendo sin sonido. Para incluir sonido, comparte una pestaña del navegador y marca “Compartir audio de la pestaña”.',
   },
 };
@@ -57,7 +63,7 @@ const canControl = () => me && (me.role === 'host' || me.role === 'cohost');
 // ---------- join screen ----------
 fetch(`/api/room/${roomId}`).then((r) => (r.ok ? r.json() : Promise.reject())).then((info) => {
   $('#joinTitle').textContent = `${t('welcome')} ${info.name}`;
-  $('#joinMovie').textContent = t('nowShowing', { movie: info.movie });
+  $('#joinMovie').textContent = info.movie ? t('nowShowing', { movie: info.movie }) : t('screenOnly');
   $('#roomName').textContent = info.name;
   document.title = info.name;
 }).catch(() => {
@@ -132,7 +138,7 @@ function onMessage(m) {
     case 'share':
       share = m.share;
       // The host stopped my share, or took the remote back: stop capturing.
-      if (screen && share?.pid !== me.pid) { for (const track of screen.getTracks()) removeOutgoing(track); screen = null; renderMediaButtons(); }
+      if (screen && (share?.pid !== me.pid || share.kind === 'live')) { for (const track of screen.getTracks()) removeOutgoing(track); screen = null; renderMediaButtons(); }
       renderShare(); sync();
       break;
     case 'role': me.role = m.role; notice(t(m.role === 'cohost' ? 'gotRemote' : 'lostRemote'), 4000); renderShare(); break;
@@ -148,6 +154,7 @@ let movieReady = false;
 function setupMovie() {
   if (movieReady) return;
   movieReady = true;
+  if (!movie.duration) { document.body.classList.add('nomovie'); return; } // screen sharing only
   const src = `/m/${roomId}/master.m3u8`;
   if (window.Hls?.isSupported()) {
     const hls = new Hls({ maxBufferLength: 30, capLevelToPlayerSize: true });
@@ -181,14 +188,14 @@ function tryPlay() {
   const p = video.play();
   if (p) p.then(() => ($('#resume').hidden = true)).catch((e) => { if (e.name === 'NotAllowedError') $('#resume').hidden = false; });
 }
-$('#resume').onclick = () => { $('#resume').hidden = true; if (state?.playing && !share) tryPlay(); document.querySelectorAll('.avatar video, #shareView').forEach((v) => v.srcObject && v.play().catch(() => {})); };
+$('#resume').onclick = () => { $('#resume').hidden = true; if (state?.playing && !share) tryPlay(); document.querySelectorAll('.avatar video, #shareView').forEach((v) => (v.srcObject || (v.id === 'shareView' && share)) && v.play().catch(() => {})); };
 
 // The heart of it: keep this device's video glued to the shared clock.
 function sync() {
   if (!joined || !state || !movie || dead) return;
   const target = targetPos();
   document.body.classList.toggle('playing', state.playing || !!share);
-  if (share) { if (!video.paused) video.pause(); return; } // someone's screen is on the big screen
+  if (share || !movie.duration) { if (!video.paused) video.pause(); return; } // someone's screen is on the big screen
   if (video.seeking || video.readyState === 0) return;
   const diff = video.currentTime - target;
   if (state.playing) {
@@ -215,13 +222,15 @@ video.addEventListener('canplay', sync);
 // ---------- controls ----------
 function renderControls() {
   const ctl = canControl();
-  $('#playBtn').hidden = !ctl || !!share;
+  $('#playBtn').hidden = !ctl || !!share || !movie?.duration;
+  $('#waiting').hidden = !!share || !movie || !!movie.duration;
+  $('#waiting').textContent = t(ctl ? 'waitingHost' : 'waiting');
   $('#seek').disabled = !ctl || !!share;
-  $('#shareBtn').hidden = !ctl || !navigator.mediaDevices?.getDisplayMedia;
+  $('#shareBtn').hidden = !ctl || (!navigator.mediaDevices?.getDisplayMedia && me?.role !== 'host');
   $('#playBtn').textContent = state?.playing ? '⏸' : '▶';
 }
 setInterval(() => {
-  if (!state || !movie || dragging) return;
+  if (!state || !movie?.duration || dragging) return;
   const p = targetPos();
   $('#cur').textContent = fmt(p);
   $('#seek').value = Math.round((p / movie.duration) * 1000);
@@ -230,7 +239,7 @@ $('#playBtn').onclick = () => send({ type: 'control', action: state?.playing ? '
 $('#seek').addEventListener('input', () => { dragging = true; $('#cur').textContent = fmt(($('#seek').value / 1000) * movie.duration); });
 $('#seek').addEventListener('change', () => { dragging = false; send({ type: 'control', action: 'seek', position: ($('#seek').value / 1000) * movie.duration }); });
 document.addEventListener('keydown', (e) => {
-  if (e.target.matches('input') || !joined || !canControl() || share) return;
+  if (e.target.matches('input') || !joined || !canControl() || share || !movie?.duration) return;
   if (e.code === 'Space') { e.preventDefault(); $('#playBtn').click(); }
   if (e.code === 'ArrowLeft') send({ type: 'control', action: 'seek', position: targetPos() - 10 });
   if (e.code === 'ArrowRight') send({ type: 'control', action: 'seek', position: targetPos() + 10 });
@@ -487,7 +496,7 @@ async function capture(constraints) {
 function renderMediaButtons() {
   $('#micBtn').className = 'icon ' + (micTrack && micOn ? 'on' : 'off');
   $('#camBtn').className = 'icon ' + (camTrack ? 'on' : 'off');
-  $('#shareBtn').className = 'icon ' + (screen ? 'on' : 'off');
+  $('#shareBtn').className = 'icon ' + (screen || (share?.kind === 'live' && share.pid === me?.pid) ? 'on' : 'off');
 }
 $('#micBtn').onclick = async () => {
   if (!micTrack) {
@@ -509,8 +518,18 @@ $('#camBtn').onclick = async () => {
 // Screen sharing: put a window, a browser tab or the whole screen on the big
 // screen for everyone, live. Only the host and people holding the remote can.
 $('#shareBtn').onclick = async () => {
+  if (!$('#cast').hidden) return closeCast();
   if (screen) return stopShare();
+  if (share?.kind === 'live' && me.role === 'host') return send({ type: 'share', on: false });
   if (share && share.pid !== me.pid) return notice(t('shareBusy'), 4000);
+  // On the host computer Villavisión captures the screen itself.
+  if (me.role === 'host') {
+    const sources = await api('/api/capture').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    if (sources?.supported) return openCast(sources);
+  }
+  browserShare();
+};
+async function browserShare() {
   if (!navigator.mediaDevices?.getDisplayMedia) return notice(t('shareUnsupported'), 5000);
   let stream;
   try {
@@ -529,7 +548,85 @@ $('#shareBtn').onclick = async () => {
   send({ type: 'share', on: true, streamId: stream.id });
   if (!stream.getAudioTracks().length) notice(t('shareNoAudio'), 7000);
   renderMediaButtons(); renderShare();
-};
+}
+
+// Villavisión's own capture: the server on this computer records the screen
+// and broadcasts it to the theatre. Only offered to the host, on that computer.
+const api = (path, opts = {}) => fetch(path, { ...opts, headers: { 'x-host-key': store.get('vv.hostKey') || '', 'content-type': 'application/json' } });
+const closeCast = () => { $('#cast').hidden = true; };
+function openCast(sources) {
+  const make = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+  const pick = (key, items) => {
+    const sel = make('select', {}, ...items.map((i) => make('option', { value: i.id, textContent: i.label })));
+    const saved = store.get(key);
+    if (saved !== null && items.some((i) => i.id === saved)) sel.value = saved;
+    sel.onchange = () => store.set(key, sel.value);
+    return sel;
+  };
+  const screenSel = pick('vv.castScreen', sources.screens);
+  const soundSel = pick('vv.castSound', [{ id: '', label: t('castNoSound') }, ...sources.audio]);
+  const start = make('button', { className: 'go', textContent: t('castStart') });
+  const other = make('button', { textContent: t('castBrowser') });
+  other.hidden = !navigator.mediaDevices?.getDisplayMedia;
+  other.onclick = () => { closeCast(); browserShare(); };
+  start.onclick = async () => {
+    start.disabled = true; start.textContent = t('castStarting');
+    const r = await api(`/api/rooms/${roomId}/broadcast`, { method: 'POST', body: JSON.stringify({ screen: screenSel.value, audio: soundSel.value === '' ? null : soundSel.value, pid: me.pid }) }).catch(() => null);
+    if (r?.ok) return closeCast();
+    const reason = (await r?.json().catch(() => null))?.error || 'offline';
+    start.disabled = false; start.textContent = t('castStart');
+    notice(reason === 'no_permission' ? t('castPermission') : t('castFailed', { reason }), 9000);
+  };
+  $('#cast').replaceChildren(
+    make('strong', { textContent: t('castTitle') }),
+    make('label', {}, make('span', { textContent: t('castScreen') }), screenSel),
+    make('label', {}, make('span', { textContent: t('castSound') }), soundSel),
+    start, other, make('small', { textContent: t('castDelay') }));
+  $('#cast').hidden = false;
+}
+
+// Playing someone's captured screen. Viewers hold the same few seconds behind
+// the host's clock, so everybody sees the same moment together.
+const LIVE_DELAY = 6;
+let liveHls = null, liveV = null;
+function playLive(v) {
+  if (liveV === v) return;
+  stopLive();
+  liveV = v;
+  const view = $('#shareView'), src = `/live/${roomId}/live.m3u8?v=${v}`;
+  view.srcObject = null;
+  if (window.Hls?.isSupported()) {
+    liveHls = new Hls({ liveSyncDuration: 4, liveMaxLatencyDuration: 14, maxBufferLength: 10, backBufferLength: 10 });
+    const hls = liveHls;
+    hls.on(Hls.Events.ERROR, (_, d) => {
+      if (!d.fatal || liveHls !== hls) return;
+      if (d.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+      else setTimeout(() => { if (liveHls === hls) { hls.loadSource(src); hls.startLoad(); } }, 1500);
+    });
+    hls.loadSource(src);
+    hls.attachMedia(view);
+  } else {
+    view.src = src; // Safari / iPhone play it natively
+  }
+  view.play().catch(() => ($('#resume').hidden = false));
+}
+function stopLive() {
+  if (liveV === null) return;
+  liveV = null;
+  liveHls?.destroy(); liveHls = null;
+  const view = $('#shareView');
+  view.playbackRate = 1;
+  view.removeAttribute('src'); view.load();
+}
+setInterval(() => {
+  const view = $('#shareView'), at = liveHls?.playingDate;
+  if (!at || view.paused || view.readyState < 3 || !view.buffered.length) return;
+  const late = (serverNow() - at.getTime()) / 1000 - LIVE_DELAY; // > 0: behind where we should be
+  const ahead = view.buffered.end(view.buffered.length - 1) - view.currentTime;
+  view.dataset.late = late.toFixed(2); // how far off the shared moment, for troubleshooting
+  if (late > 8 && liveHls.liveSyncPosition) view.currentTime = liveHls.liveSyncPosition;
+  else view.playbackRate = Math.abs(late) < 0.15 ? 1 : clamp(1 + late * 0.2, 0.9, ahead > 1.5 ? 1.1 : 1);
+}, 1000);
 function stopShare() {
   if (!screen) return;
   for (const track of screen.getTracks()) removeOutgoing(track);
@@ -540,12 +637,16 @@ function stopShare() {
 function renderShare() {
   const view = $('#shareView');
   const mine = !!share && share.pid === me?.pid;
-  const stream = !share ? null : mine ? screen : peers.get(share.pid)?.streams.get(share.streamId) || null;
+  const live = share?.kind === 'live';
+  const stream = !share || live ? null : mine ? screen : peers.get(share.pid)?.streams.get(share.streamId) || null;
+  if (live) playLive(share.v); else stopLive();
+  if (share) closeCast();
+  renderMediaButtons();
   document.body.classList.toggle('sharing', !!share);
   view.hidden = !share;
   view.muted = mine || video.muted;
   view.volume = video.volume;
-  if (view.srcObject !== stream) { view.srcObject = stream; if (stream) view.play().catch(() => ($('#resume').hidden = false)); }
+  if (!live && view.srcObject !== stream) { view.srcObject = stream; if (stream) view.play().catch(() => ($('#resume').hidden = false)); }
   $('#live').hidden = !share;
   if (share) $('#live').textContent = t('live', { name: people.find((p) => p.pid === share.pid)?.name || '' });
   renderControls();

@@ -89,3 +89,28 @@ test('signals are relayed only to the named person and carry the true sender', (
   assert.equal(b.last('signal').from, a.person.pid);
   assert.equal(c.last('signal'), undefined);
 });
+
+test('a theatre with no film ignores playback controls but allows screen sharing', () => {
+  const room = new Room({ id: 'r', name: 'Room', movie: { id: null, title: null, duration: 0, subs: [] }, isHostKey: (k) => k === 'secret' });
+  const host = join(room, 'Host', { hostKey: 'secret' });
+  room.handle(host, { type: 'control', action: 'play' });
+  assert.equal(room.play.playing, false);
+  room.handle(host, { type: 'share', on: true, streamId: 'abc' });
+  assert.equal(room.share?.streamId, 'abc');
+});
+
+test('only a host in the room can put a captured screen up, and it ends when they leave', () => {
+  const room = makeRoom();
+  let ended = 0;
+  room.onLiveEnd = () => ended++;
+  const host = join(room, 'Host', { hostKey: 'secret' }), guest = join(room, 'Guest');
+  assert.equal(room.startLive(guest.last('welcome').you.pid), false);
+  assert.equal(room.startLive('nobody'), false);
+  assert.equal(room.startLive(host.last('welcome').you.pid), true);
+  assert.equal(guest.last('share').share.kind, 'live');
+  room.handle(guest, { type: 'share', on: false });
+  assert.equal(room.share?.kind, 'live');
+  room.leave(host);
+  assert.equal(room.share, null);
+  assert.equal(ended, 1);
+});

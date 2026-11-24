@@ -8,6 +8,13 @@ const fmt = (s) => { s = Math.floor(s); const h = Math.floor(s / 3600), mm = Mat
 const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
 let publicUrl = '', upload = null;
 
+$('#screenRoom').onclick = async () => {
+  const name = prompt('Name for this theatre:', 'Screen share');
+  if (name === null) return;
+  await api('/api/rooms', { method: 'POST', body: JSON.stringify({ name }) });
+  load();
+};
+
 async function load() {
   const r = await api('/api/library');
   if (!r.ok) { $('#locked').hidden = false; $('#dash').hidden = true; return; }
@@ -26,9 +33,9 @@ async function load() {
     const del = el('button', { className: 'danger', textContent: 'Close' });
     del.onclick = async () => { if (confirm(`Close "${room.name}"? Its link will stop working.`)) { await api('/api/rooms/' + room.id, { method: 'DELETE' }); load(); } };
     return el('div', { className: 'row' },
-      el('div', { className: 'grow' }, el('strong', { textContent: room.name }), el('small', { textContent: `${title[room.movieId] || 'movie missing'} · ${room.people} watching · at ${fmt(room.position || 0)}` })),
+      el('div', { className: 'grow' }, el('strong', { textContent: room.name }), el('small', { textContent: room.movieId ? `${title[room.movieId] || 'movie missing'} · ${room.people} watching · at ${fmt(room.position || 0)}` : `Screen sharing · ${room.people} watching` })),
       el('a', { className: 'btn primary', href: '/r/' + room.id, textContent: 'Enter' }), copy, del);
-  }) : [el('p', { className: 'dim', textContent: 'No theatres open yet. Open one from a movie below.' })]));
+  }) : [el('p', { className: 'dim', textContent: 'No theatres open yet. Open one from a movie below, or open one just for screen sharing.' })]));
 
   $('#movies').replaceChildren(...(movies.length ? movies.map((mv) => {
     const open = el('button', { className: 'primary', textContent: 'Open a theatre' });

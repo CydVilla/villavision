@@ -19,7 +19,11 @@ export class Room {
     this.people = new Map(); // pid -> person (connected)
     this.remembered = new Map(); // clientId -> { pid, role, seat }
     this.chat = [];
-    this.share = null; // { pid, streamId } while someone is sharing their screen
+    // While something is on the big screen instead of the film: { pid, streamId }
+    // for a share sent from a browser, or { kind: 'live', pid, v } for a screen
+    // captured by Villavisión on the host computer.
+    this.share = null;
+    this.onLiveEnd = () => {}; // told when a 'live' share ends, so capture can stop
     this.ice = ice || null;
   }
 
@@ -36,6 +40,16 @@ export class Room {
     }
   }
 
+  // The host computer started capturing its screen for this theatre. Only a
+  // host who is in the room may put it up; it comes down when they leave.
+  startLive(pid) {
+    const host = this.people.get(String(pid));
+    if (!host || host.role !== 'host') return false;
+    if (this.play.playing) this.setPlay(false, this.position(), host.name);
+    this.setShare({ kind: 'live', pid: host.pid, streamId: null, v: Date.now() });
+    return true;
+  }
+
   setPlay(playing, position, by) {
     this.play = { playing, position, at: Date.now(), by };
     this.broadcast({ type: 'state', state: this.play, now: Date.now() });
@@ -43,8 +57,10 @@ export class Room {
   }
 
   setShare(share) {
+    const wasLive = this.share?.kind === 'live';
     this.share = share;
     this.broadcast({ type: 'share', share });
+    if (wasLive && share?.kind !== 'live') this.onLiveEnd();
   }
 
   publicPeople() {
@@ -139,7 +155,7 @@ export class Room {
         break;
 
       case 'control': {
-        if (!canControl || this.share) return;
+        if (!canControl || this.share || !this.movie.duration) return;
         if (msg.action === 'play') this.setPlay(true, this.position() >= this.movie.duration ? 0 : this.position(), me.name);
         else if (msg.action === 'pause') this.setPlay(false, this.position(), me.name);
         else if (msg.action === 'seek') {

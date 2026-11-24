@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { Room } from './room.js';
 import { startTunnel } from './tunnel.js';
+import { listSources, startCapture, LIVE_FILE } from './capture.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 try { process.loadEnvFile(path.join(ROOT, '.env')); } catch {}
@@ -15,6 +16,7 @@ const PUBLIC = path.join(ROOT, 'public');
 const MEDIA = path.resolve(process.env.MEDIA_DIR || path.join(ROOT, 'media'));
 const DATA = path.join(ROOT, 'data');
 const INCOMING = path.join(DATA, 'incoming');
+const LIVE = path.join(DATA, 'live');
 const STATE_FILE = path.join(DATA, 'state.json');
 const PORT = Number(process.env.PORT) || 4747;
 const HOST = process.env.HOST || '127.0.0.1';
@@ -40,6 +42,7 @@ const VIDEO_EXT = new Set(['.mp4', '.mkv', '.mov', '.m4v', '.avi', '.webm', '.ts
 fs.mkdirSync(MEDIA, { recursive: true });
 fs.rmSync(INCOMING, { recursive: true, force: true });
 fs.mkdirSync(INCOMING, { recursive: true });
+fs.rmSync(LIVE, { recursive: true, force: true });
 let state = { hostKey: crypto.randomBytes(18).toString('base64url'), rooms: {} };
 try { state = { ...state, ...JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')) }; } catch {}
 function writeState() {
@@ -69,6 +72,8 @@ const isHost = (req) => isLocal(req) && isHostKey(req.headers['x-host-key']);
 
 // ---------- library ----------
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,80}$/;
+// A theatre with no film: the big screen is only for screen sharing.
+const NO_MOVIE = Object.freeze({ id: null, title: null, duration: 0, subs: [] });
 function loadMovie(id) {
   if (!ID_RE.test(id)) return null;
   try { return JSON.parse(fs.readFileSync(path.join(MEDIA, id, 'meta.json'), 'utf8')); } catch { return null; }
@@ -106,13 +111,49 @@ function openRoom(id) {
   if (rooms.has(id)) return rooms.get(id);
   const saved = Object.hasOwn(state.rooms, id) ? state.rooms[id] : null;
   if (!saved) return null;
-  const movie = loadMovie(saved.movieId);
+  const movie = saved.movieId ? loadMovie(saved.movieId) : NO_MOVIE;
   if (!movie) return null;
   const room = new Room({ id, name: saved.name, movie, position: saved.position || 0, isHostKey, onChange: save, ice });
+  room.onLiveEnd = () => { if (live?.roomId === id) stopLive(); };
   rooms.set(id, room);
   return room;
 }
+// ---------- screen capture on this computer ----------
+// One capture at a time: { roomId, dir, stop } while this computer's screen is
+// being broadcast to a theatre, `starting` while ffmpeg is warming up.
+let live = null, starting = false;
+function stopLive() {
+  const was = live;
+  if (!was) return;
+  live = null;
+  was.stop();
+  const room = rooms.get(was.roomId);
+  if (room?.share?.kind === 'live') room.setShare(null);
+}
+async function beginLive(room, { screen, audio, pid }) {
+  const sources = listSources();
+  if (!sources.supported) return 'unsupported';
+  if (!sources.screens.some((s) => s.id === screen)) return 'unknown_screen';
+  if (audio != null && !sources.audio.some((a) => a.id === audio)) return 'unknown_audio';
+  const host = room.people.get(String(pid));
+  if (!host || host.role !== 'host') return 'not_in_theatre';
+  if (starting) return 'busy';
+  starting = true;
+  stopLive();
+  const dir = path.join(LIVE, `${room.id}.${Date.now()}`);
+  try {
+    // If ffmpeg stops by itself (display unplugged, crash), take the share down.
+    const cap = await startCapture({ dir, screen, audio, onEnd: () => { if (live?.dir === dir) stopLive(); } });
+    live = { roomId: room.id, dir, stop: cap.stop };
+    if (!room.startLive(pid)) { stopLive(); return 'not_in_theatre'; }
+    return null;
+  } catch (e) {
+    return e.message;
+  } finally { starting = false; }
+}
+
 function closeRoom(id) {
+  if (live?.roomId === id) stopLive();
   const room = rooms.get(id);
   if (room) { for (const person of room.people.values()) person.conn.close(); rooms.delete(id); }
   delete state.rooms[id];
@@ -213,9 +254,20 @@ async function route(req, res) {
     const mm = /^\/m\/([\w-]+)\/(.+)$/.exec(p);
     if (mm) {
       const saved = Object.hasOwn(state.rooms, mm[1]) ? state.rooms[mm[1]] : null;
-      if (!saved || !ID_RE.test(saved.movieId) || !/\.(m3u8|ts|vtt)$/.test(mm[2])) return notFound(req, res);
+      if (!saved || !saved.movieId || !ID_RE.test(saved.movieId) || !/\.(m3u8|ts|vtt)$/.test(mm[2])) return notFound(req, res);
       const f = safeJoin(path.join(MEDIA, saved.movieId), mm[2]);
       return f ? serveFile(req, res, f, 'private, max-age=3600') : notFound(req, res);
+    }
+    // This computer's captured screen, reachable only through the theatre showing it.
+    const lv = /^\/live\/([\w-]+)\/([\w.]+)$/.exec(p);
+    if (lv) {
+      if (!live || live.roomId !== lv[1] || !LIVE_FILE.test(lv[2])) return notFound(req, res);
+      const f = safeJoin(live.dir, lv[2]);
+      return f ? serveFile(req, res, f, lv[2].endsWith('.m3u8') ? 'no-store' : 'private, max-age=60') : notFound(req, res);
+    }
+    if (p === '/api/capture') {
+      if (!isHost(req)) return send(req, res, 401, { error: 'unauthorized' });
+      return send(req, res, 200, { ...listSources(), live: live?.roomId || null });
     }
     const rm = /^\/api\/room\/([\w-]+)$/.exec(p);
     if (rm) {
@@ -239,14 +291,28 @@ async function route(req, res) {
 
   if (req.method === 'POST' && p === '/api/rooms') {
     const body = await readJson(req);
-    const movie = loadMovie(String(body.movieId || ''));
+    // No movieId means a theatre for screen sharing only.
+    const movie = body.movieId == null ? NO_MOVIE : loadMovie(String(body.movieId));
     if (!movie) return send(req, res, 400, { error: 'unknown_movie' });
     const id = crypto.randomBytes(12).toString('base64url');
-    state.rooms[id] = { movieId: movie.id, name: String(body.name || '').trim().slice(0, 60) || movie.title, position: 0, createdAt: Date.now() };
+    state.rooms[id] = { movieId: movie.id, name: String(body.name || '').trim().slice(0, 60) || movie.title || 'Screen share', position: 0, createdAt: Date.now() };
     save();
     return send(req, res, 200, { id });
   }
   if (req.method === 'POST' && p === '/api/movies') return receiveMovie(req, res, url);
+
+  const cast = /^\/api\/rooms\/([\w-]+)\/broadcast$/.exec(p);
+  if (cast && req.method === 'POST') {
+    const room = openRoom(cast[1]);
+    if (!room) return send(req, res, 404, { error: 'not_found' });
+    const body = await readJson(req);
+    const error = await beginLive(room, { screen: String(body.screen ?? ''), audio: body.audio == null ? null : String(body.audio), pid: body.pid });
+    return error ? send(req, res, 400, { error }) : send(req, res, 200, { ok: true });
+  }
+  if (cast && req.method === 'DELETE') {
+    if (live?.roomId === cast[1]) stopLive();
+    return send(req, res, 200, { ok: true });
+  }
 
   const delRoom = /^\/api\/rooms\/([\w-]+)$/.exec(p);
   if (req.method === 'DELETE' && delRoom) { closeRoom(delRoom[1]); save(); return send(req, res, 200, { ok: true }); }
@@ -324,6 +390,7 @@ server.listen(PORT, HOST, () => {
 });
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => {
   try { writeState(); } catch {}
+  stopLive();
   tunnel?.kill();
   process.exit(0);
 });

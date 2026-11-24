@@ -9,8 +9,9 @@ chat, react, talk and see each other while it plays.
 - **A theatre, not a video call:** a big screen, rows of seats, house lights
   that dim when the movie starts.
 - **Social:** text chat, floating emoji reactions, voice chat and webcams.
-- **Screen sharing:** put a window, a browser tab or your whole screen on the
-  big screen, live.
+- **Screen sharing:** Villavisión captures the host computer's screen itself and
+  broadcasts it to the theatre, the way OBS does. No film is needed: you can
+  open a theatre just for sharing.
 - **One remote:** the host controls play, pause and skip, and can hand the
   remote to anyone.
 - **Kind to slow connections:** movies are prepared in full quality plus a
@@ -84,8 +85,33 @@ To try it alone first, `npm start` runs everything without going online.
 
 ### Screen sharing
 
-Click 🖥️ and pick what to show. The movie pauses and your screen takes over the
-big screen until you stop.
+There are two ways to share, and no film is needed for either: on the host
+page, **Screen sharing theatre** opens a theatre with an empty big screen.
+
+**From the host computer (Villavisión's own capture).** When the host clicks
+🖥️ on the computer that runs Villavisión, a small panel asks which screen and
+which sound input to use, then **Start broadcast**. ffmpeg records the screen
+and the theatre plays it as a live stream. Click 🖥️ again to stop; it also
+stops if the host leaves the theatre.
+
+- Everyone sees it about 6 seconds behind, and in sync with each other. Good
+  for watching something together, slow for pointing at things as you talk.
+- It works for any number of viewers and on phones, because it travels the
+  same way the film does.
+- **Sound:** pick a sound input in the panel. A microphone works as is. To
+  send the computer's own sound on a Mac, install a virtual audio device such
+  as [BlackHole](https://github.com/ExistentialAudio/BlackHole) and pick it; on
+  Windows pick "Stereo Mix" if your sound card offers it.
+- **macOS permission:** allow Screen Recording for the app you start
+  Villavisión from (Terminal, iTerm…) in System Settings → Privacy & Security.
+  Without it macOS sends no picture and the theatre says the capture was
+  blocked.
+- Built and tested on macOS. The Windows (`gdigrab`) and Linux (`x11grab`,
+  X11 only) capture commands are written but have not been run yet.
+
+**From a browser.** People holding the remote, and the host with **Use the
+browser's sharing instead**, share through the browser's own picker. It has
+almost no delay.
 
 - **Sound:** browsers can only capture sound from a *browser tab* (tick "Also
   share tab audio"), or from the whole screen on Windows and ChromeOS. On a Mac,
@@ -186,6 +212,8 @@ than in a public issue.
   may play sound.
 - **Microphone, camera and screen sharing are unavailable.** Browsers allow
   them only on `https` addresses and on `localhost`.
+- **"Could not capture the screen" when starting a broadcast.** On a Mac, allow
+  Screen Recording for the app that started Villavisión, then start it again.
 - **A brand-new fixed address does not load.** New DNS records can take a
   minute or two.
 
@@ -195,6 +223,7 @@ than in a public issue.
 server/room.js          one theatre: shared clock, seats, roles, chat, share state
 server/index.js         web server, WebSocket endpoint, library, uploads
 server/ingest.js        ffmpeg: movie file -> adaptive HLS + WebVTT subtitles
+server/capture.js       ffmpeg: this computer's screen -> short live HLS stream
 server/tunnel*.js       Cloudflare Tunnel (temporary or fixed address)
 public/                 the theatre and host pages (plain HTML, CSS and JS)
 test/                   tests for the theatre logic (npm test)
