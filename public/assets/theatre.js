@@ -50,7 +50,7 @@ const colorFor = (id) => { let h = 0; for (const c of id) h = (h * 31 + c.charCo
 
 const video = $('#movie');
 let ws, me = null, movie = null, state = null, share = null, people = [], joined = false, myName = '';
-let clockOffset = 0, bestRtt = Infinity, lastHardSeek = 0, dragging = false, backoff = 500, dead = false;
+let clockOffset = 0, bestRtt = Infinity, lastHardSeek = 0, dragging = false, backoff = 500, dead = false, correcting = false;
 const serverNow = () => Date.now() + clockOffset;
 const canControl = () => me && (me.role === 'host' || me.role === 'cohost');
 
@@ -196,9 +196,12 @@ function sync() {
     if (Math.abs(diff) > 1.2) {
       if (Date.now() - lastHardSeek > 4000) { lastHardSeek = Date.now(); video.currentTime = Math.min(target + 0.25, movie.duration); }
       video.playbackRate = 1;
-    } else if (Math.abs(diff) > 0.06 && video.readyState >= 3) {
-      video.playbackRate = clamp(1 - diff * 0.4, 0.9, 1.1); // nudge gently instead of jumping
-    } else video.playbackRate = 1;
+    } else if (video.readyState >= 3 && (Math.abs(diff) > 0.04 || (correcting && Math.abs(diff) > 0.01))) {
+      // Nudge gently instead of jumping, and keep nudging until nearly exact,
+      // so two viewers end up within a few hundredths of a second of each other.
+      correcting = true;
+      video.playbackRate = clamp(1 - diff * 0.5, 0.92, 1.08);
+    } else { correcting = false; video.playbackRate = 1; }
   } else {
     if (!video.paused) video.pause();
     video.playbackRate = 1;
@@ -408,7 +411,7 @@ function ensurePeer(pid, sid) {
   if (peer && sid && peer.sid !== sid) { peer.pc.close(); peers.delete(pid); peer = null; } // they reloaded
   if (peer) return peer;
   const pc = new RTCPeerConnection({ iceServers: ICE });
-  peer = { pc, sid, polite: me.pid < pid, makingOffer: false, ignoreOffer: false, streams: new Map(), senders: new Map() };
+  peer = { pc, sid, polite: me.pid < pid, makingOffer: false, ignoreOffer: false, queue: Promise.resolve(), streams: new Map(), senders: new Map() };
   peers.set(pid, peer);
   pc.onicecandidate = (e) => e.candidate && send({ type: 'signal', to: pid, data: { candidate: e.candidate } });
   pc.onnegotiationneeded = async () => {
@@ -426,9 +429,19 @@ function ensurePeer(pid, sid) {
   return peer;
 }
 
-async function onSignal({ from, sid, data }) {
-  if (!data || !people.some((p) => p.pid === from)) return;
-  const peer = ensurePeer(from, sid), pc = peer.pc;
+// Handshake messages for one person are handled strictly one at a time. If a
+// reply and a fresh request arrive back to back, handling them in parallel
+// makes the request look like a clash and it gets dropped, leaving that
+// person's camera, microphone or shared screen never arriving.
+function onSignal(m) {
+  if (!m.data || !people.some((p) => p.pid === m.from)) return Promise.resolve();
+  const peer = ensurePeer(m.from, m.sid);
+  peer.queue = peer.queue.then(() => handleSignal(peer, m)).catch((e) => console.warn('signal', e));
+  return peer.queue;
+}
+async function handleSignal(peer, { from, data }) {
+  if (peers.get(from) !== peer) return; // they reconnected meanwhile
+  const pc = peer.pc;
   if (data.description) {
     const collision = data.description.type === 'offer' && (peer.makingOffer || pc.signalingState !== 'stable');
     peer.ignoreOffer = !peer.polite && collision;
