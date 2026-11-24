@@ -272,7 +272,7 @@ async function route(req, res) {
     const rm = /^\/api\/room\/([\w-]+)$/.exec(p);
     if (rm) {
       const room = openRoom(rm[1]);
-      return room ? send(req, res, 200, { name: room.name, movie: room.movie.title }) : send(req, res, 404, { error: 'not_found' });
+      return room ? send(req, res, 200, { name: room.name, movie: room.movie.title, invite: publicUrl ? `${publicUrl}/r/${room.id}` : null }) : send(req, res, 404, { error: 'not_found' });
     }
     if (p === '/api/library') {
       if (!isHost(req)) return send(req, res, 401, { error: 'unauthorized' });

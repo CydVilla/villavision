@@ -13,6 +13,7 @@ const T = {
     giveRemote: '🎮 Give the remote', takeRemote: 'Take the remote back', theirVolume: 'Their voice volume',
     gotRemote: 'You have the remote: you can play, pause and skip.', lostRemote: 'The host took the remote back.',
     micDenied: 'Microphone or camera was blocked. Allow it in your browser to use this.', needHttps: 'Voice and camera need a secure (https) link.',
+    invite: 'Invite link', show: 'Show', hide: 'Hide', copy: 'Copy', copied: 'Copied ✓', inviteLocal: 'This theatre is not online yet, so this link only works on this computer.',
     subsOff: 'Subtitles off', subsOn: 'Subtitles: {label}',
     live: '● LIVE · {name} is sharing their screen', shareBusy: 'Someone else is already sharing.', shareUnsupported: 'This browser can’t share a screen. Use Chrome, Edge or Firefox on a computer.',
     castTitle: 'Share this computer’s screen', castScreen: 'Screen', castSound: 'Sound', castNoSound: 'No sound', castStart: 'Start broadcast', castStarting: 'Starting…', castBrowser: 'Use the browser’s sharing instead',
@@ -29,6 +30,7 @@ const T = {
     giveRemote: '🎮 Dar el control', takeRemote: 'Quitar el control', theirVolume: 'Volumen de su voz',
     gotRemote: 'Tienes el control: puedes reproducir, pausar y saltar.', lostRemote: 'El anfitrión retomó el control.',
     micDenied: 'El micrófono o la cámara están bloqueados. Permítelos en tu navegador.', needHttps: 'La voz y la cámara necesitan un enlace seguro (https).',
+    invite: 'Enlace de invitación', show: 'Mostrar', hide: 'Ocultar', copy: 'Copiar', copied: 'Copiado ✓', inviteLocal: 'Esta sala aún no está en línea; este enlace solo funciona en esta computadora.',
     subsOff: 'Subtítulos apagados', subsOn: 'Subtítulos: {label}',
     live: '● EN VIVO · {name} comparte su pantalla', shareBusy: 'Otra persona ya está compartiendo.', shareUnsupported: 'Este navegador no puede compartir pantalla. Usa Chrome, Edge o Firefox en una computadora.',
     castTitle: 'Compartir la pantalla de esta computadora', castScreen: 'Pantalla', castSound: 'Sonido', castNoSound: 'Sin sonido', castStart: 'Empezar a transmitir', castStarting: 'Empezando…', castBrowser: 'Usar el compartir del navegador',
@@ -59,6 +61,34 @@ let ws, me = null, movie = null, state = null, share = null, people = [], joined
 let clockOffset = 0, bestRtt = Infinity, lastHardSeek = 0, dragging = false, backoff = 500, dead = false, correcting = false;
 const serverNow = () => Date.now() + clockOffset;
 const canControl = () => me && (me.role === 'host' || me.role === 'cohost');
+
+// ---------- invite link ----------
+// Shown masked in the header, like a party-game room code: reveal it when you
+// want to read it out, copy it without ever putting it on screen.
+const localPage = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+let inviteUrl = location.origin + location.pathname, inviteShown = false;
+function renderInvite() {
+  $('#inviteLabel').textContent = t('invite');
+  $('#inviteLink').textContent = inviteShown ? inviteUrl : '••••••••';
+  $('#inviteLink').classList.toggle('masked', !inviteShown);
+  $('#inviteShow').textContent = t(inviteShown ? 'hide' : 'show');
+  if (!$('#inviteCopy').dataset.busy) $('#inviteCopy').textContent = t('copy');
+}
+// The host watches on localhost; the link for everyone else is the public one.
+const refreshInvite = () => fetch(`/api/room/${roomId}`).then((r) => r.json()).then((info) => {
+  inviteUrl = info.invite || location.origin + location.pathname;
+  renderInvite();
+  return !!info.invite;
+}).catch(() => false);
+$('#inviteShow').onclick = async () => { inviteShown = !inviteShown; if (inviteShown) await refreshInvite(); renderInvite(); };
+$('#inviteCopy').onclick = async () => {
+  const online = await refreshInvite();
+  try { await navigator.clipboard.writeText(inviteUrl); } catch { inviteShown = true; renderInvite(); return; } // show it so it can be copied by hand
+  const b = $('#inviteCopy');
+  b.dataset.busy = '1'; b.textContent = t('copied');
+  setTimeout(() => { delete b.dataset.busy; renderInvite(); }, 1500);
+  if (!online && localPage) notice(t('inviteLocal'), 6000);
+};
 
 // ---------- join screen ----------
 fetch(`/api/room/${roomId}`).then((r) => (r.ok ? r.json() : Promise.reject())).then((info) => {
@@ -112,6 +142,7 @@ function onMessage(m) {
       if (Array.isArray(m.ice) && m.ice.length) ICE = m.ice;
       if (bestRtt === Infinity) clockOffset = m.now - Date.now();
       $('#roomName').textContent = m.room.name;
+      $('#invite').hidden = false; renderInvite();
       setupMovie();
       buildSeats(m.room.seats);
       $('#log').textContent = '';
