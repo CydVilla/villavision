@@ -14,7 +14,7 @@ import { spawn, execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 export const PLAYLIST = 'live.m3u8';
-export const LIVE_FILE = /^(live\.m3u8|s\d{1,9}\.ts)$/;
+export const LIVE_FILE = /^(live\.m3u8|v\d\.m3u8|s\d_\d{1,9}\.ts)$/;
 const SEGMENT_SECONDS = 2;
 const FPS = 30;
 const HELPER_SOURCE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'native', 'vv-capture.swift');
@@ -28,7 +28,6 @@ const run = (cmd, args, timeout = 8000) => new Promise((resolve) => {
 // ---------- the macOS helper ----------
 // helper.state: 'off' (not macOS), 'building', 'ready', 'no_swift', 'failed'.
 const helper = { state: 'off', path: null };
-export const helperState = () => helper.state;
 
 // Compiles the helper in the background, once per version of its source.
 export function prepareHelper(dataDir) {
@@ -91,7 +90,13 @@ export function parseHelperList(json) {
   let data;
   try { data = JSON.parse(json); } catch { return { supported: false, screens: [], windows: [] }; }
   const screens = (data.displays || []).map((d, i) => ({ id: `display:${d.id}`, label: null, n: i + 1, width: d.width, height: d.height }));
-  const windows = (data.windows || []).map((w) => ({ id: `window:${w.id}`, label: short(w.app && w.app !== w.title ? `${w.app} — ${w.title}` : w.title, 70), width: w.width, height: w.height }))
+  // A window with no title is only worth listing when it covers a screen:
+  // that is an app showing something full screen (a browser playing a video
+  // full screen does it in a second, untitled window). The rest are panels.
+  const covers = (w) => screens.some((d) => w.width >= d.width * 0.95 && w.height >= d.height * 0.85);
+  const name = (w) => (w.title ? (w.app && w.app !== w.title ? `${w.app} — ${w.title}` : w.title) : `${w.app || '?'} — ⛶ full screen`);
+  const windows = (data.windows || []).filter((w) => w.title || covers(w))
+    .map((w) => ({ id: `window:${w.id}`, label: short(name(w), 70), width: w.width, height: w.height }))
     .sort((a, b) => a.label.localeCompare(b.label));
   return { supported: screens.length > 0, screens, windows };
 }
@@ -120,47 +125,74 @@ export function parseDshowAudio(text) {
 }
 
 // ---------- the commands for one capture ----------
+// The stream is made at up to three sizes at once, so each viewer's player can
+// pick the best one their connection keeps up with and change as it varies.
+// Returns [{ height, kbps }], sharpest first. Bitrate follows the picture size.
+export function ladder(width, height) {
+  const kbps = (w, h) => Math.round(Math.min(8000, Math.max(900, (w * h * FPS * 0.11) / 1000)) / 100) * 100;
+  const steps = [{ height, kbps: kbps(width, height) }];
+  for (const h of [720, 480]) if (h <= height * 0.75) steps.push({ height: h, kbps: kbps((width / height) * h, h) });
+  return steps;
+}
+
 // `source` and `audio` are an item and an id from listSources(). Returns
-// { helper: [args] | null, ffmpeg: [args] }; with a helper, ffmpeg reads raw
-// pictures from it on stdin and (for computer sound) samples on descriptor 3.
+// { helper: [args] | null, ffmpeg: [args], variants }; with a helper, ffmpeg
+// reads raw pictures from it on stdin and (for computer sound) samples on
+// descriptor 3.
 export function capturePlan({ platform = process.platform, source, audio = null, dir }) {
   const [kind, value] = [source.id.slice(0, source.id.indexOf(':')), source.id.slice(source.id.indexOf(':') + 1)];
   const mic = audio?.startsWith('mic:') ? audio.slice(4) : null;
   const q = ['-thread_queue_size', '1024'];
-  let helperArgs = null, input, filter = `fps=${FPS},scale=-2:'min(1080,ih)',format=yuv420p`;
+  let helperArgs = null, input, prepare = `fps=${FPS},scale=-2:'min(1080,ih)',format=yuv420p`;
+  let steps = [{ height: 1080, kbps: 6000 }]; // size not known in advance: one stream
+  let sound = audio != null ? '1:a' : null; // which input carries the sound
 
   if (kind === 'display' || kind === 'window') {
     const [w, h] = fitSize(source.width, source.height);
     helperArgs = ['capture', kind, value, String(w), String(h), String(FPS), ...(audio === 'system' ? ['audio'] : [])];
-    input = ['-f', 'rawvideo', '-pix_fmt', 'nv12', '-video_size', `${w}x${h}`, '-framerate', String(FPS), '-use_wallclock_as_timestamps', '1', ...q, '-i', 'pipe:0'];
+    input = ['-f', 'rawvideo', '-pix_fmt', 'nv12', '-video_size', `${w}x${h}`, '-framerate', String(FPS), '-use_wallclock_as_timestamps', '1', '-thread_queue_size', '16', '-i', 'pipe:0'];
+    // (A short queue for pictures: when the computer is too busy to keep up, the
+    // helper skips pictures instead of the stream falling ever further behind.)
     // Sound is an unbroken run of samples, so it keeps time by counting them.
     if (audio === 'system') input.push('-f', 'f32le', '-ar', '48000', '-ac', '2', ...q, '-i', 'pipe:3');
     else if (mic !== null) input.push('-f', 'avfoundation', ...q, '-i', `:${mic}`);
-    filter = `fps=${FPS},format=yuv420p`;
+    // The helper's pictures are already in the form the Mac's encoder takes,
+    // so nothing is converted: that keeps the capture light on a busy computer.
+    prepare = `fps=${FPS}`;
+    steps = ladder(w, h);
   } else if (platform === 'darwin') {
     input = ['-nostdin', '-f', 'avfoundation', ...q, '-framerate', String(FPS), '-capture_cursor', '1', '-i', `${value}:${mic ?? 'none'}`];
+    if (mic !== null) sound = '0:a';
   } else if (platform === 'win32') {
     input = ['-nostdin', '-f', 'gdigrab', ...q, '-framerate', String(FPS), '-draw_mouse', '1', '-i', kind === 'title' ? `title=${value}` : 'desktop'];
     if (mic !== null) input.push('-f', 'dshow', ...q, '-i', `audio=${mic}`);
-    filter = `fps=${FPS},scale=trunc(iw/2)*2:trunc(ih/2)*2,scale=-2:'min(1080,ih)',format=yuv420p`;
+    prepare = `fps=${FPS},scale=trunc(iw/2)*2:trunc(ih/2)*2,scale=-2:'min(1080,ih)',format=yuv420p`;
   } else {
     input = ['-nostdin', '-f', 'x11grab', ...q, '-framerate', String(FPS), '-draw_mouse', '1', '-i', value];
     if (mic !== null) input.push('-f', 'pulse', ...q, '-i', 'default');
   }
+  const n = steps.length;
+  const graph = `[0:v]${prepare},split=${n}${steps.map((_, i) => `[p${i}]`).join('')};`
+    + steps.map((s, i) => `[p${i}]${i ? `scale=-2:${s.height}:flags=bicubic` : 'null'}[v${i}]`).join(';');
+  const maps = steps.flatMap((_, i) => ['-map', `[v${i}]`, ...(sound ? ['-map', sound] : [])]);
+  const rates = steps.flatMap((s, i) => [`-b:v:${i}`, `${s.kbps}k`, `-maxrate:v:${i}`, `${Math.round(s.kbps * 1.25)}k`, `-bufsize:v:${i}`, `${s.kbps * 2}k`]);
   const gop = String(FPS * SEGMENT_SECONDS);
   const video = platform === 'darwin'
-    ? ['-c:v', 'h264_videotoolbox', '-realtime', '1', '-b:v', '5000k', '-maxrate', '6000k']
-    : ['-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency', '-b:v', '4500k', '-maxrate', '5000k', '-bufsize', '9000k'];
+    ? ['-c:v', 'h264_videotoolbox', '-realtime', '1', '-profile:v', 'high']
+    : ['-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency'];
   return {
     helper: helperArgs,
+    variants: n,
     ffmpeg: [
       '-hide_banner', '-loglevel', 'error', ...input,
-      '-vf', filter,
-      ...video, '-g', gop, '-keyint_min', gop, '-force_key_frames', `expr:gte(t,n_forced*${SEGMENT_SECONDS})`,
-      ...(audio != null ? ['-af', 'aresample=async=1', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000'] : ['-an']),
+      '-filter_complex', graph, ...maps,
+      ...video, ...rates, '-g', gop, '-keyint_min', gop, '-force_key_frames', `expr:gte(t,n_forced*${SEGMENT_SECONDS})`,
+      '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv',
+      ...(sound ? ['-af', 'aresample=async=1', '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000'] : []),
       '-f', 'hls', '-hls_time', String(SEGMENT_SECONDS), '-hls_list_size', '8',
       '-hls_flags', 'delete_segments+program_date_time+independent_segments+temp_file',
-      '-hls_segment_filename', path.join(dir, 's%05d.ts'), path.join(dir, PLAYLIST),
+      '-master_pl_name', PLAYLIST, '-var_stream_map', steps.map((_, i) => (sound ? `v:${i},a:${i}` : `v:${i}`)).join(' '),
+      '-hls_segment_filename', path.join(dir, 's%v_%05d.ts'), path.join(dir, 'v%v.m3u8'),
     ],
   };
 }
@@ -213,7 +245,7 @@ export function startCapture({ dir, source, audio, onEnd }) {
       p.on('exit', () => finish(reason()));
     }
     poll = setInterval(() => {
-      if (!fs.existsSync(path.join(dir, PLAYLIST))) return;
+      if (![PLAYLIST, ...Array.from({ length: plan.variants }, (_, i) => `v${i}.m3u8`)].every((f) => fs.existsSync(path.join(dir, f)))) return;
       clearInterval(poll); clearTimeout(giveUp);
       ready = true;
       resolve({ stop });

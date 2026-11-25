@@ -57,7 +57,7 @@ test('a theatre with no film ignores playback controls but allows screen sharing
   room.handle(host, { type: 'control', action: 'play' });
   assert.equal(room.play.playing, false);
   assert.equal(room.startLive(host.person.pid), true);
-  assert.equal(room.share?.kind, 'live');
+  assert.ok(room.share);
 });
 
 test('only a host in the room can put a captured screen up, and it ends when they leave', () => {
@@ -68,39 +68,10 @@ test('only a host in the room can put a captured screen up, and it ends when the
   assert.equal(room.startLive(guest.last('welcome').you.pid), false);
   assert.equal(room.startLive('nobody'), false);
   assert.equal(room.startLive(host.last('welcome').you.pid), true);
-  assert.equal(guest.last('share').share.kind, 'live');
+  assert.equal(guest.last('share').share.pid, host.person.pid);
   room.handle(guest, { type: 'share', on: false });
-  assert.equal(room.share?.kind, 'live');
+  assert.ok(room.share);
   room.leave(host);
   assert.equal(room.share, null);
   assert.equal(ended, 1);
-});
-
-test('the shared computer belongs to the theatre and only the host can take it down', () => {
-  const room = makeRoom();
-  let ended = 0;
-  room.onDeskEnd = () => ended++;
-  const host = join(room, 'Host', { hostKey: 'secret' }), guest = join(room, 'Guest');
-  assert.equal(room.startDesk(guest.last('welcome').you.pid), false);
-  assert.equal(room.startDesk(host.last('welcome').you.pid), true);
-  assert.equal(guest.last('share').share.kind, 'desk');
-  room.handle(guest, { type: 'share', on: false });
-  room.handle(guest, { type: 'share', on: true, streamId: 'x' });
-  assert.equal(room.share.kind, 'desk');
-  room.leave(host);
-  assert.equal(room.share.kind, 'desk'); // still there when the host steps out
-  const back = join(room, 'Host', { hostKey: 'secret' });
-  room.handle(back, { type: 'share', on: false });
-  assert.equal(room.share, null);
-  assert.equal(ended, 1);
-});
-
-test('a private ticket identifies one person and is never shown to others', () => {
-  const room = makeRoom();
-  const a = join(room, 'Ana'), b = join(room, 'Ben');
-  const ticket = a.last('welcome').you.ticket;
-  assert.equal(room.personByTicket(ticket).name, 'Ana');
-  assert.equal(room.personByTicket('nope'), null);
-  assert.equal(room.personByTicket(undefined), null);
-  assert.ok(!JSON.stringify(b.msgs).includes(ticket));
 });

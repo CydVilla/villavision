@@ -47,8 +47,12 @@ func list() async {
   }
   var windows: [[String: Any]] = []
   for w in c.windows {
-    guard w.windowLayer == 0, let title = w.title, !title.isEmpty,
-          w.frame.width >= 160, w.frame.height >= 120 else { continue }
+    guard w.windowLayer == 0, w.frame.width >= 160, w.frame.height >= 120 else { continue }
+    // A browser playing a video full screen shows it in a second window with
+    // no title. Keep untitled windows when they are big enough to be one, and
+    // leave out the many small untitled ones (toolbars, popovers).
+    let title = (w.title ?? "").trimmingCharacters(in: .whitespaces)
+    if title.isEmpty && (w.frame.width < 480 || w.frame.height < 270) { continue }
     // System overlays that are not real windows.
     let bundle = w.owningApplication?.bundleIdentifier ?? ""
     if ["com.apple.WindowManager", "com.apple.dock", "com.apple.controlcenter", "com.apple.notificationcenterui"].contains(bundle) { continue }
@@ -181,6 +185,10 @@ func capture(kind: String, id: UInt32, width: Int, height: Int, fps: Int, audio:
   config.height = height
   config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
   config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+  // Say which colours these are, so every player shows them the same way.
+  config.colorSpaceName = CGColorSpace.sRGB
+  config.colorMatrix = CGDisplayStream.yCbCrMatrix_ITU_R_709_2
+  if #available(macOS 14.0, *) { config.captureResolution = .best }
   config.showsCursor = true
   config.scalesToFit = true
   config.queueDepth = 5
@@ -194,13 +202,13 @@ func capture(kind: String, id: UInt32, width: Int, height: Int, fps: Int, audio:
   let output = Output(width: width, height: height)
   let stream = SCStream(filter: filter, configuration: config, delegate: output)
   do {
-    try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: DispatchQueue(label: "vv.video"))
-    if audio { try stream.addStreamOutput(output, type: .audio, sampleHandlerQueue: DispatchQueue(label: "vv.audio")) }
+    try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: DispatchQueue(label: "vv.video", qos: .userInteractive))
+    if audio { try stream.addStreamOutput(output, type: .audio, sampleHandlerQueue: DispatchQueue(label: "vv.audio", qos: .userInteractive)) }
     try await stream.startCapture()
   } catch {
     fail("permission: \(error.localizedDescription)")
   }
-  let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "vv.clock"))
+  let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "vv.clock", qos: .userInteractive))
   timer.schedule(deadline: .now(), repeating: 1.0 / Double(fps), leeway: .milliseconds(2))
   timer.setEventHandler { output.emitFrame() }
   timer.resume()

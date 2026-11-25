@@ -38,11 +38,6 @@ button { cursor: pointer; }
 #movie { width: 100%; height: 100%; object-fit: contain; background: #000; display: block; }
 #movie::cue { background: rgba(0, 0, 0, .65); color: #fff; font-size: 1.1em; }
 #shareView { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
-#deskView { position: absolute; inset: 0; background: #000; }
-#deskView[hidden] { display: none; }
-#deskVideo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
-#deskVideo[hidden] { display: none; }
-#cast hr { width: 100%; border: 0; border-top: 1px solid var(--line); margin: 2px 0; }
 #waiting { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; color: #8d8577; font-size: clamp(14px, 2.4cqw, 22px); }
 #waiting[hidden] { display: none; }
 body.nomovie :is(#playBtn, #cur, #seek, #dur, #ccBtn) { display: none; }
@@ -122,6 +117,14 @@ body.playing #seats { filter: brightness(.72); }
 #cast small { color: var(--dim); }
 #popover input { accent-color: var(--gold); }
 #popover button { background: #24131a; border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+
+/* ---------- theatre mode: the screen fills the page ---------- */
+body.cinema :is(#marquee, #seats) { display: none; }
+body.cinema #house { background: #000; }
+body.cinema #stage { flex: 1; padding: 0; }
+body.cinema #fit { container-type: size; height: 100%; }
+body.cinema #screen { width: min(100cqw, 100cqh * 16 / 9); border-radius: 0; box-shadow: none; }
+body.cinema #controls { padding: 6px 12px calc(6px + env(safe-area-inset-bottom)); }
 
 /* ---------- small screens ---------- */
 @media (max-width: 860px) {

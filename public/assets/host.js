@@ -15,37 +15,6 @@ $('#screenRoom').onclick = async () => {
   load();
 };
 
-// The shared computer: a one-time setup, then it can be started from any theatre.
-async function loadDesk() {
-  const r = await api('/api/workspace').catch(() => null);
-  const d = r?.ok ? await r.json() : null;
-  const box = $('#desk');
-  if (!d || d.state === 'unsupported' || d.state === 'off') { box.hidden = true; return; }
-  const text = {
-    preparing: 'Getting ready…',
-    no_swift: 'Needs Apple’s command line tools. Run  xcode-select --install  and restart Villavisión.',
-    idle: `A private Linux desktop with a web browser that everyone in a theatre can see, and people holding the remote can use. Setting it up downloads about ${d.downloadMb} MB once.`,
-    downloading: `Downloading Linux… ${d.pct}%`,
-    building: 'Installing the desktop and browser inside it. This takes a few minutes; keep this computer awake.',
-    ready: 'Ready. In a theatre, click 🖥️ and choose “Start a shared computer”.',
-    starting: 'Starting…',
-    running: 'Running in a theatre.',
-    failed: `Setup failed: ${d.error || 'unknown error'}`,
-  }[d.state] || d.state;
-  const kids = [el('div', { className: 'grow' }, el('strong', { textContent: 'Shared computer' }), el('small', { textContent: text }))];
-  if (d.state === 'idle' || (d.state === 'failed' && d.error !== 'helper')) {
-    const b = el('button', { className: 'primary', textContent: d.state === 'idle' ? 'Set up' : 'Try again' });
-    b.onclick = async () => { b.disabled = true; await api('/api/workspace/setup', { method: 'POST' }); loadDesk(); };
-    kids.push(b);
-  }
-  if (d.state === 'downloading') kids.push(el('progress', { max: 100, value: d.pct }));
-  box.replaceChildren(...kids);
-  box.hidden = false;
-  clearTimeout(loadDesk.timer);
-  if (['preparing', 'downloading', 'building', 'starting'].includes(d.state)) loadDesk.timer = setTimeout(loadDesk, 2000);
-}
-loadDesk();
-
 async function load() {
   const r = await api('/api/library');
   if (!r.ok) { $('#locked').hidden = false; $('#dash').hidden = true; return; }

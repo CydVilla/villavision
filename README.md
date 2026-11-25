@@ -72,14 +72,18 @@ To try it alone first, `npm start` runs everything without going online.
 | ▶ / ⏸ and the timeline | Play, pause, skip for everyone | Host, and anyone holding the remote |
 | 🖥️ | Share a screen or window on the big screen | Host |
 | 🎤 📷 | Your microphone and webcam | Everyone |
-| 🔊 CC ⛶ | Your own volume, subtitles, fullscreen | Everyone |
+| 🔊 CC | Your own volume and subtitles | Everyone |
+| 🎬 ⛶ | Theatre mode (the screen fills the page) and fullscreen | Everyone |
 | 😂 ❤️ … | Reactions that float over the screen | Everyone |
 
 - Click an empty seat to move there.
 - Click a person to set how loud their voice is for you. The host also sees
   **Give the remote** there.
 - Keyboard, for whoever holds the remote: space plays or pauses, the arrow
-  keys skip 10 seconds.
+  keys skip 10 seconds. For everyone: **T** is theatre mode, **F** fullscreen.
+- **On an iPhone** fullscreen shows the video alone, the way the phone's own
+  player does, because phones cannot put a whole page full screen. Theatre
+  mode fills the page instead and keeps the reactions and controls.
 - **Wear headphones if your microphone is on**, or the movie echoes back to
   everyone.
 
@@ -94,10 +98,16 @@ share (a whole screen or one window) and which sound to send, then **Start
 broadcast**. The theatre plays it as a live stream. Click 🖥️ again to stop; it
 also stops if the host leaves the theatre or the shared window is closed.
 
-- Everyone sees it about 6 seconds behind, and in sync with each other. Good
+- Everyone sees it about 8 seconds behind, and in sync with each other. Good
   for watching something together, slow for pointing at things as you talk.
+  The delay is the cushion that keeps it smooth when a connection hiccups.
 - It works for any number of viewers and on phones, because it travels the
   same way the film does.
+- **Quality follows each viewer's connection.** The stream is made at up to
+  three sizes at once (up to 1080p at about 7 Mbit/s, then 720p and 480p),
+  and each player picks the sharpest one it can keep up with. Every viewer
+  downloads from the host computer, so the host's upload speed is shared
+  between them.
 - **On a Mac** a small helper (`server/native/vv-capture.swift`) uses
   ScreenCaptureKit, the system framework OBS uses. It captures a single window
   even when other windows cover it, windows on other desktops, and the
@@ -107,6 +117,11 @@ also stops if the host leaves the theatre or the shared window is closed.
   screens, with a microphone or a virtual device such as
   [BlackHole](https://github.com/ExistentialAudio/BlackHole) for sound.
 - **A browser tab** is shared by picking its browser window.
+- **A video playing full screen in a browser** is in a window of its own,
+  listed as **Safari — ⛶ full screen** (or the browser's name). Pick that
+  one; the browser's normal window only shows a blurred placeholder while
+  the video is full screen. If you leave full screen, that window closes and
+  the broadcast ends, so start it again with the normal window.
 - **Sound:** "Computer sound" with a whole screen sends everything the computer
   plays, including the voices of people in the theatre, who then hear
   themselves a few seconds late. Share one window to send only that app's
@@ -134,11 +149,7 @@ server/room.js          one theatre: shared clock, seats, roles, chat, share sta
 server/index.js         web server, WebSocket endpoint, library, uploads
 server/ingest.js        ffmpeg: movie file -> adaptive HLS + WebVTT subtitles
 server/capture.js       this computer's screen or one window -> short live HLS stream
-server/native/          macOS helpers, compiled on first start: screen capture, virtual machine
-server/workspace.js     the shared computer (unfinished, off unless SHARED_COMPUTER=1): setup, start, stop
-server/vm/user-data     what gets installed inside the shared computer
-server/rfb.js           drops keys and clicks from people who may only watch it
-server/deskaudio.js     passes the shared computer's sound and video stream on to the theatre
+server/native/          macOS screen capture helper, compiled on first start
 server/tunnel*.js       Cloudflare Tunnel (temporary or fixed address)
 public/                 the theatre and host pages (plain HTML, CSS and JS)
 test/                   tests for the theatre logic (npm test)
