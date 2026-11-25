@@ -273,7 +273,7 @@ document.addEventListener('keydown', (e) => {
   if (e.target.matches('input, select') || !joined || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.code === 'KeyT') $('#cineBtn').click();
   if (e.code === 'KeyF') $('#fsBtn').click();
-  if (e.code === 'Escape') setCinema(false);
+  if (e.code === 'Escape' && !fsElement()) setCinema(false);
 });
 document.addEventListener('keydown', (e) => {
   if (e.target.matches('input') || !joined || !canControl() || share || !movie?.duration) return;
@@ -305,17 +305,35 @@ if (matchMedia('(max-width: 860px)').matches) $('#app').classList.remove('chat-o
 // Theatre mode: the big screen fills the page, on any device.
 const setCinema = (on) => { document.body.classList.toggle('cinema', on); $('#cineBtn').classList.toggle('on', on); if (on) $('#app').classList.remove('chat-open'); };
 $('#cineBtn').onclick = () => setCinema(!document.body.classList.contains('cinema'));
-// Fullscreen. An iPhone can only put a video full screen, not a page, so
-// there it is whichever video is on the big screen; with nothing playing yet,
-// theatre mode is the closest thing.
+// Fullscreen: the big screen fills the whole display, and the controls slide
+// away until the mouse moves. An iPhone can only put a video full screen, not
+// a page, so there it is whichever video is on the big screen; with nothing
+// playing yet, theatre mode is the closest thing.
+const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement;
 $('#fsBtn').onclick = () => {
   const el = document.documentElement, now = share ? $('#shareView') : video;
-  if (document.fullscreenElement || document.webkitFullscreenElement) return (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  if (fsElement()) return (document.exitFullscreen || document.webkitExitFullscreen).call(document);
   const ask = el.requestFullscreen || el.webkitRequestFullscreen;
   if (ask) return Promise.resolve(ask.call(el)).catch(() => setCinema(true));
   if (now.webkitSupportsFullscreen && now.readyState >= 1) now.webkitEnterFullscreen();
   else setCinema(!document.body.classList.contains('cinema'));
 };
+let cinemaBefore = false, idleTimer = null;
+const wake = () => {
+  document.body.classList.remove('idle');
+  clearTimeout(idleTimer);
+  // Stay visible while a panel is open or something in the bar has focus.
+  if (fsElement()) idleTimer = setTimeout(() => { if ($('#cast').hidden && $('#popover').hidden && !$('#controls').matches(':hover')) document.body.classList.add('idle'); }, 3000);
+};
+for (const name of ['fullscreenchange', 'webkitfullscreenchange']) document.addEventListener(name, () => {
+  const on = !!fsElement();
+  if (on === document.body.classList.contains('fs')) return;
+  document.body.classList.toggle('fs', on);
+  $('#fsBtn').classList.toggle('on', on);
+  if (on) { cinemaBefore = document.body.classList.contains('cinema'); setCinema(true); } else setCinema(cinemaBefore);
+  wake();
+});
+for (const name of ['mousemove', 'mousedown', 'keydown', 'touchstart']) document.addEventListener(name, wake, { passive: true });
 
 let noticeTimer;
 function notice(text, ms = 2500) {
