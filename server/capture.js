@@ -237,7 +237,7 @@ export function startCapture({ dir, source, audio, onEnd }) {
       if (alive(ffmpeg)) ffmpeg.kill('SIGKILL');
       setTimeout(() => { if (grab && alive(grab)) grab.kill('SIGKILL'); }, 3000).unref();
       fs.rmSync(dir, { recursive: true, force: true });
-      if (ready) onEnd?.(); else reject(new Error(err || 'capture_failed'));
+      if (ready) onEnd?.(err || 'capture_failed'); else reject(new Error(err || 'capture_failed'));
     };
     const reason = () => (/permission|not authorized|denied|declined/i.test(log) ? 'no_permission' : /gone:/.test(log) ? 'source_gone' : log.trim().split('\n').pop()?.slice(0, 160) || 'capture_failed');
     for (const p of procs) {

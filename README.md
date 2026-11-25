@@ -95,8 +95,12 @@ theatre with an empty big screen.
 Villavisión captures the screen itself, on the computer that runs it, so only
 the host can share. When the host clicks 🖥️ there, a small panel asks what to
 share (a whole screen or one window) and which sound to send, then **Start
-broadcast**. The theatre plays it as a live stream. Click 🖥️ again to stop; it
-also stops if the host leaves the theatre or the shared window is closed.
+broadcast**. The theatre plays it as a live stream. Click 🖥️ again to stop. It
+also stops when the shared window is closed, or five minutes after the host
+leaves the theatre. (The host's own tab often sits behind the window being
+shared, where a browser may let it drop its connection for a moment; the
+broadcast carries on and the tab reconnects by itself.) The terminal prints
+why each broadcast ended.
 
 - Everyone sees it about 8 seconds behind, and in sync with each other. Good
   for watching something together, slow for pointing at things as you talk.

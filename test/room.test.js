@@ -60,10 +60,10 @@ test('a theatre with no film ignores playback controls but allows screen sharing
   assert.ok(room.share);
 });
 
-test('only a host in the room can put a captured screen up, and it ends when they leave', () => {
+test('only a host in the room can put a captured screen up, and only the host can take it down', () => {
   const room = makeRoom();
-  let ended = 0;
-  room.onLiveEnd = () => ended++;
+  const ended = [];
+  room.onLiveEnd = (why) => ended.push(why);
   const host = join(room, 'Host', { hostKey: 'secret' }), guest = join(room, 'Guest');
   assert.equal(room.startLive(guest.last('welcome').you.pid), false);
   assert.equal(room.startLive('nobody'), false);
@@ -71,7 +71,28 @@ test('only a host in the room can put a captured screen up, and it ends when the
   assert.equal(guest.last('share').share.pid, host.person.pid);
   room.handle(guest, { type: 'share', on: false });
   assert.ok(room.share);
-  room.leave(host);
+  room.handle(host, { type: 'share', on: false });
   assert.equal(room.share, null);
-  assert.equal(ended, 1);
+  assert.deepEqual(ended, ['Host stopped it']);
+});
+
+test('a share survives the host dropping out and coming back, and ends if they stay away', async () => {
+  const room = new Room({ id: 'r', name: 'Room', movie, isHostKey: (k) => k === 'secret', shareGrace: 40 });
+  const ended = [];
+  room.onLiveEnd = (why) => ended.push(why);
+  const host = join(room, 'Host', { hostKey: 'secret' });
+  join(room, 'Guest');
+  room.startLive(host.person.pid);
+  room.leave(host); // their tab dozed behind the shared window
+  assert.ok(room.share);
+  const back = join(room, 'Host', { hostKey: 'secret' });
+  await new Promise((r) => setTimeout(r, 80));
+  assert.ok(room.share);
+  join(room, 'Host', { hostKey: 'secret' }); // a second tab replaces the first
+  assert.ok(room.share);
+  assert.equal(back.closed, true);
+  room.leave([...room.people.values()].find((p) => p.name === 'Host').conn);
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(room.share, null);
+  assert.deepEqual(ended, ['the host left the theatre']);
 });

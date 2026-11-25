@@ -114,7 +114,7 @@ function openRoom(id) {
   const movie = saved.movieId ? loadMovie(saved.movieId) : NO_MOVIE;
   if (!movie) return null;
   const room = new Room({ id, name: saved.name, movie, position: saved.position || 0, isHostKey, onChange: save, ice });
-  room.onLiveEnd = () => { if (live?.roomId === id) stopLive(); };
+  room.onLiveEnd = (why) => { if (live?.roomId === id) stopLive(why); };
   rooms.set(id, room);
   return room;
 }
@@ -122,13 +122,15 @@ function openRoom(id) {
 // One capture at a time: { roomId, dir, stop } while this computer's screen is
 // being broadcast to a theatre, `starting` while ffmpeg is warming up.
 let live = null, starting = false;
-function stopLive() {
+function stopLive(why = 'stopped') {
   const was = live;
   if (!was) return;
   live = null;
   was.stop();
   const room = rooms.get(was.roomId);
-  if (room?.share) room.setShare(null);
+  // Say why in the terminal: a share that ends by itself is otherwise a mystery.
+  console.log(`  ${new Date().toLocaleTimeString()}  Screen share in "${room?.name || was.roomId}" ended: ${why}`);
+  if (room?.share) room.setShare(null, why);
 }
 async function beginLive(room, { source: sourceId, audio, pid }) {
   if (starting) return 'busy';
@@ -150,8 +152,9 @@ async function beginLiveNow(room, { sourceId, audio, pid }) {
   const dir = path.join(LIVE, `${room.id}.${Date.now()}`);
   try {
     // If ffmpeg stops by itself (display unplugged, crash), take the share down.
-    const cap = await startCapture({ dir, source, audio, onEnd: () => { if (live?.dir === dir) stopLive(); } });
+    const cap = await startCapture({ dir, source, audio, onEnd: (why) => { if (live?.dir === dir) stopLive(`the capture stopped (${why})`); } });
     live = { roomId: room.id, dir, stop: cap.stop };
+    console.log(`  ${new Date().toLocaleTimeString()}  Screen share in "${room.name}" started: ${source.label || source.id}`);
     if (!room.startLive(pid)) { stopLive(); return 'not_in_theatre'; }
     return null;
   } catch (e) {

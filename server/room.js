@@ -9,7 +9,7 @@ const rid = (n = 6) => crypto.randomBytes(n).toString('base64url');
 const clean = (s, max) => String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max);
 
 export class Room {
-  constructor({ id, name, movie, position = 0, isHostKey, onChange, ice }) {
+  constructor({ id, name, movie, position = 0, isHostKey, onChange, ice, shareGrace = 5 * 60 * 1000 }) {
     this.id = id;
     this.name = name;
     this.movie = movie;
@@ -22,7 +22,12 @@ export class Room {
     // { pid, v } while the host's screen, captured by Villavisión on the host
     // computer, is on the big screen instead of the film.
     this.share = null;
-    this.onLiveEnd = () => {}; // told when the share ends, so the capture can stop
+    this.onLiveEnd = () => {}; // told when the share ends (and why), so the capture can stop
+    // The host's own tab often sits behind the window being shared, where a
+    // browser lets it doze and drop its connection. So when the host goes
+    // missing the share carries on for this long, waiting for them to return.
+    this.shareGrace = shareGrace;
+    this.shareTimer = null;
     this.ice = ice || null;
   }
 
@@ -55,11 +60,12 @@ export class Room {
     this.onChange();
   }
 
-  setShare(share) {
+  setShare(share, why = 'stopped') {
     const was = this.share;
+    clearTimeout(this.shareTimer);
     this.share = share;
     this.broadcast({ type: 'share', share });
-    if (was && !share) this.onLiveEnd();
+    if (was && !share) this.onLiveEnd(why);
   }
 
   publicPeople() {
@@ -101,7 +107,6 @@ export class Room {
       old.conn.person = null;
       old.conn.close();
       this.people.delete(mem.pid);
-      if (this.share?.pid === mem.pid) this.setShare(null);
     }
 
     const taken = new Set([...this.people.values()].map((p) => p.seat));
@@ -114,6 +119,7 @@ export class Room {
       }
     }
 
+    if (this.share?.pid === mem.pid) clearTimeout(this.shareTimer); // the sharer is back
     const person = { pid: mem.pid, sid: rid(4), name, role: mem.role, seat: mem.seat, mic: false, cam: false, streamId: null, conn, mem, lastReact: 0, lastChat: 0 };
     conn.person = person;
     this.people.set(person.pid, person);
@@ -138,7 +144,11 @@ export class Room {
     const person = conn.person;
     if (!person || this.people.get(person.pid) !== person) return;
     this.people.delete(person.pid);
-    if (this.share?.pid === person.pid) this.setShare(null);
+    if (this.share?.pid === person.pid) {
+      clearTimeout(this.shareTimer);
+      this.shareTimer = setTimeout(() => { if (this.share?.pid === person.pid && !this.people.has(person.pid)) this.setShare(null, 'the host left the theatre'); }, this.shareGrace);
+      this.shareTimer.unref?.();
+    }
     this.broadcast({ type: 'people', people: this.publicPeople() });
     this.say(person.name, 'left');
   }
@@ -214,7 +224,7 @@ export class Room {
       case 'share': {
         // A share is started by the server (startLive), never by a
         // message from a browser. The host can take down whatever is up.
-        if (!msg.on && this.share && (this.share.pid === me.pid || me.role === 'host')) this.setShare(null);
+        if (!msg.on && this.share && (this.share.pid === me.pid || me.role === 'host')) this.setShare(null, `${me.name} stopped it`);
         break;
       }
 
